@@ -53,7 +53,7 @@ test('TP balance never treats gaps, unknown inputs or zero intake as a computed 
     {account:'1',tp:'ТП-1',values:[50,null,40,0]},
   ]),[],{},intake([
     {meter:'A',tp:'ТП-1',values:[100,100,0,0]},
-    {meter:'B',tp:'ТП-1',values:[null,20,30,0]},
+    {meter:'B',tp:'ТП-1',values:[null,20,0,0]},
   ]));
   const b=service.contour('ТП-1',{}).balance;
   assert.equal(b.status,'incomplete');
@@ -65,7 +65,7 @@ test('TP balance never treats gaps, unknown inputs or zero intake as a computed 
 });
 test('TP balance preserves negative imbalance and never disguises PO greater than intake',()=>{
   const service=createAnalysisService(model([
-    {account:'1',tp:'ТП-1',values:[150,99,0,0]},
+    {account:'1',tp:'ТП-1',values:[150,99,100,100]},
   ]),[],{},intake([{meter:'A',tp:'ТП-1',values:[100,100,100,100]}]));
   const b=service.contour('ТП-1',{balPct:10}).balance;
   assert.equal(b.months[0].imbalance,-50);

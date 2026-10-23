@@ -114,6 +114,7 @@ export function createTpBalances(pack=null) {
       totalIntake,totalOutgoing,imbalance,pct,elevated,negative,
       missingIntake,missingOutgoing,outside,uncertain,
       intakeMeterCount:item.meters,intakeRows:item.rows,duplicateMeters:item.duplicates,
+      multipleTP:item.multipleTP,unknownMeters:item.unknownMeters,
       warnings:warning,
     };
   }
