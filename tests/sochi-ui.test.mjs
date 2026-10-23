@@ -73,7 +73,7 @@ test('Sochi browser sees one enterprise, scoped RES, server search and no automa
     terminate(){}
   }
   globalThis.Worker=DummyWorker;
-  t.after(async()=>{await page.happyDOM.close();});
+  t.after(async()=>{await delay(250);page.dispatchEvent(new page.Event('pagehide'));await delay(20);await page.happyDOM.close();});
   await import('../public/app.js?sochi-ui-test');
   await until(()=>$('#res-list').querySelectorAll('[data-res]').length===1,'automatic Sochi enterprise');
   assert.equal($('#district-button').disabled,true);
