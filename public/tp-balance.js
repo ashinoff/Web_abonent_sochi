@@ -76,7 +76,7 @@ export function createTpBalances(pack=null) {
   function compare(tp,consumptionMonths,consumptionValues,{threshold=10,hasConsumption=true}={}){
     const key=tpKey(tp),item=aggregated.get(key);
     if(!item)return empty('no-tp','ТП не найдена в загруженном файле «Приём».',key);
-    if(!Array.isArray(consumptionMonths)||!Array.isArray(consumptionValues))return empty('no-consumption','Для выбранной ТП нет помесячного полезного отпуска в ПО.',key);
+    if(!hasConsumption||!Array.isArray(consumptionMonths)||!Array.isArray(consumptionValues))return empty('no-consumption','Для выбранной ТП нет помесячного полезного отпуска в ПО.',key);
     let intakeSum=0,outgoingSum=0,complete=0,missingIntake=0,missingOutgoing=0,outside=0,
       elevated=0,negative=0,uncertain=0;
     const monthRows=consumptionMonths.map((date,i)=>{
@@ -127,6 +127,11 @@ export function createTpBalances(pack=null) {
 }
 
 function empty(status,message,tp=''){
-  return {status,message,tp,values:null,months:[],warnings:[],
+  const result={status,message,tp,values:null,months:[],warnings:[],
     comparedMonths:0,totalIntake:null,totalOutgoing:null,imbalance:null,pct:null};
+  return {
+    ...result,
+    hasTP:()=>false,tpList:()=>[],summary:{tpCount:0,unassignedRows:0,months:0},
+    compare:()=>({...result}),
+  };
 }
