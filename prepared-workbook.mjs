@@ -2,13 +2,14 @@ import * as XLSX from '@e965/xlsx';
 import { detectLayout, parseMatrix, restoreNumericIdentifiers, identifierWarnings } from './public/core.js';
 import { readMonthlyWorkbook } from './public/monthly.js';
 import { inspectExcelWorkbook } from './public/workbook-check.js';
+import { parseIncomingWorkbook } from './public/incoming.js';
 import { packRegistry, packMonthly } from './public/prepared-data.js';
 import { readJournalWorkbook } from './public/journals.js';
 
 export function prepareWorkbook(buffer, role, filename = '') {
   if (role === 'instant' || role === 'events') return readJournalWorkbook(buffer, XLSX, role);
   if (role === 'consumption') return packMonthly(readMonthlyWorkbook(buffer, XLSX));
-  if (role === 'incoming') return { format: 1, role, ...inspectExcelWorkbook(buffer, XLSX) };
+  if (role === 'incoming') return parseIncomingWorkbook(buffer, XLSX) || { format: 1, role, ...inspectExcelWorkbook(buffer, XLSX) };
   if (role !== 'registry') throw new Error('Неизвестный вид файла.');
   const book = XLSX.read(buffer, { type: 'array', dense: true, cellText: true, cellDates: false, cellHTML: false, cellFormula: false, cellNF: true, sheetRows: 100002 });
   const sheets = [], skipped = [], warnings=identifierWarnings();

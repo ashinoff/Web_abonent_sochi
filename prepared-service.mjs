@@ -55,7 +55,7 @@ export function preparationLimits(containerMB) {
 export async function preparationChildFlags(path, role, filename, containerMB) {
   const { heapMB, childMB } = preparationLimits(containerMB);
   let streaming = false;
-  if (['events', 'registry', 'consumption'].includes(role) && !/\.xlsb$/i.test(filename || '')) {
+  if (['events', 'registry', 'consumption', 'incoming'].includes(role) && !/\.xlsb$/i.test(filename || '')) {
     const file = await open(path, 'r'), signature = Buffer.alloc(4);
     try { await file.read(signature, 0, 4, 0); } finally { await file.close(); }
     streaming = signature.equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
