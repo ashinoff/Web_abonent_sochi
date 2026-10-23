@@ -4,5 +4,5 @@ meta:
     name: npm
     version: 22
 run:
-  scriptName: server.mjs
+  scriptName: sochi-server.mjs
   containerPort: 3000
