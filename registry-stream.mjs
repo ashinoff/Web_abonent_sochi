@@ -19,7 +19,7 @@ function cellValue(cell, content, strings, date1904) {
   return { t: 'n', v: value, z, raw: content.trim() };
 }
 
-function displayCell(cell, date1904) {
+export function displayCell(cell, date1904) {
   if (cell.t === 'z') return '';
   if (cell.z === 'General' && cell.t === 's') return clean(cell.v);
   try { return clean(XLSX.SSF.format(cell.z, cell.v, { date1904 })); }
@@ -33,7 +33,7 @@ function displayCell(cell, date1904) {
 // Merged headers can be stored after sheetData. The first pass keeps only the
 // first 96 rows and header merges; the second emits one complete source row at a
 // time. Neither pass retains worksheet XML, cell objects or the full matrix.
-async function readRows(workbook, sheet, { firstRowsOnly = false, onRow, onTag, onExtent } = {}) {
+export async function readRows(workbook, sheet, { firstRowsOnly = false, onRow, onTag, onExtent } = {}) {
   const { book, formats, strings, info } = workbook;
   let row = [], number = 0, previousRow = 0, nextColumn = 0, cell, content = '', valueText = false, inlineText = false, phonetic = 0;
   await parseXML(book, sheet.path, {
@@ -110,7 +110,7 @@ async function sheetLayout(workbook, sheet) {
   return detectLayout(sample, merges);
 }
 
-class PackageWriter {
+export class PackageWriter {
   constructor(path) { this.fd = openSync(path, 'w'); this.pending = []; this.bytes = 0; }
   add(text) {
     const bytes = Buffer.from(text); this.pending.push(bytes); this.bytes += bytes.length;

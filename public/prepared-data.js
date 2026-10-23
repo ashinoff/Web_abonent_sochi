@@ -16,7 +16,7 @@ export function unpackRegistry(pack) {
     return { sheet, file, layout, records, sample: records.slice(0, 3).map(r => r.values) };
   });
 }
-const monthlyKeys = ['account','alias','point','pointNumber','name','pointName','tp','zone','off','values','source','accountFallback'];
+export const monthlyKeys = ['account','alias','point','pointNumber','name','pointName','tp','zone','off','values','source','accountFallback'];
 export function packMonthly(parsed) {
   return { format: 1, role: 'consumption', parserVersion: MONTHLY_PARSER_VERSION, months: parsed.months, warnings: parsed.warnings,
     rows: parsed.rows.map(row => monthlyKeys.map(key => row[key])) };
