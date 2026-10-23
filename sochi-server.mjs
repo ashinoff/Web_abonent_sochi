@@ -10,6 +10,7 @@ import { createAccessControl, createAdminHandler, readAdminJson, onlyFields } fr
 import { createMapGeocoder } from './map-geocoder.mjs';
 import { createNotificationsHandler } from './user-notifications.mjs';
 import { createSochiAnalytics } from './sochi-analytics.mjs';
+import { createSochiRegistry } from './sochi-registry.mjs';
 import { receiveSochiWorkbook } from './sochi-import.mjs';
 import { preparationMemory } from './prepared-service.mjs';
 import { fault, superAdminConfig } from './accounts.mjs';
@@ -56,7 +57,8 @@ export function createSochiServer(options={}) {
   if(!store)throw new Error('Для Сочи обязательна база PostgreSQL: задайте DB_HOST, DB_PORT, DB_NAME, DB_USER и DB_PASSWORD.');
   const access=createAccessControl({env,store,sendJson});
   const geocoder=options.mapGeocoder||createMapGeocoder();
-  const analytics=createSochiAnalytics({store,source:SOCHI_SOURCE});
+  const registry=createSochiRegistry({store,source:SOCHI_SOURCE});
+  const analytics=createSochiAnalytics({store,source:SOCHI_SOURCE,registry});
   const notifications=createNotificationsHandler({
     source:SOCHI_SOURCE,store,sendJson,canAccess:(req,path)=>canAccessRes(req.account,path),
     canClear:req=>['admin','superadmin'].includes(req.account?.role),
@@ -105,6 +107,7 @@ export function createSochiServer(options={}) {
           const status=await store.saveSochiUpload(SOCHI_SOURCE,{
             resPath,role,path,filename,size:received.size,revision:received.revision,json:received.json,actor:actor.login,
           });
+          registry.invalidate(resPath);
           analytics.invalidate(resPath);
           sendJson(res,200,{ok:true,role,resPath,status});
         } finally {release();}
@@ -121,6 +124,14 @@ export function createSochiServer(options={}) {
       }
       if(url.pathname==='/api/admin/refresh-catalog')throw fault('Облачные источники отключены. Файлы загружает администратор.',405);
       if(url.pathname.startsWith('/api/admin/')) {await admin(req,res,url);return;}
+      if(url.pathname==='/api/registry'){
+        if(req.method!=='POST')throw fault('Метод не поддерживается.',405);
+        const body=await readAdminJson(req);
+        onlyFields(body,['resPath','action','payload']);
+        assertScope(req.account,body.resPath);
+        const result=await registry.query(body);
+        sendJson(res,200,{result});return;
+      }
       if(url.pathname==='/api/analysis-settings') {
         if(req.method!=='GET')throw fault('Метод не поддерживается.',405);
         sendJson(res,200,{settings:await store.getSochiAnalysisSettings(SOCHI_SOURCE)});return;
@@ -151,7 +162,7 @@ export function createSochiServer(options={}) {
       }
       if(url.pathname==='/api/load-map') {
         if(req.method!=='GET')throw fault('Метод не поддерживается.',405);
-        sendJson(res,200,{folders:accessFolders(req.account,await store.listFolders(SOCHI_SOURCE))});return;
+        sendJson(res,200,{folders:accessFolders(req.account,await store.listFolders(SOCHI_SOURCE)).map(f=>({...f,load_blocked:false}))});return;
       }
       if(url.pathname==='/api/directory') {
         if(req.method!=='GET')throw fault('Метод не поддерживается.',405);
@@ -171,7 +182,7 @@ export function createSochiServer(options={}) {
         assertScope(req.account,path);
         const folder=(await store.listFolders(SOCHI_SOURCE)).find(f=>f.res_path===SOCHI_RES_PATHS.find(r=>path.startsWith(r+'/')));
         if(!folder||folder.statuses?.[role]?.path!==path)throw fault('Пакет этого РЭС не найден.',404,'not_found');
-        await store.assertLoadAllowed?.(SOCHI_SOURCE,path);
+        // RES loading controls affect administrator writes, not reading published snapshots.
         const meta=await store.getMeta(SOCHI_SOURCE,path,role);
         if(!meta)throw fault('Файл ещё не загружен администратором.',404,'not_found');
         const revision=Buffer.from(meta.revision).toString('base64url');
