@@ -77,6 +77,30 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     assert.equal((await prepared.json()).role,'incoming');
     const directory=await api('/api/directory?path='+encodeURIComponent(SOCHI_RES_PATHS[0]),{headers:{Cookie:userCookie}});
     assert.equal((await directory.json())._embedded.items[0].path,filePath);
+    const registryBook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(registryBook,XLSX.utils.aoa_to_sheet([
+      ['ЛС','Номер счетчика','ФИО','Адрес','ТП'],
+      ['000001','000123456','Иванов','г. Сочи, Тестовая 1','ТП-1'],
+      ['000002','000555999','Петров','г. Сочи, Тестовая 2','ТП-2'],
+    ]),'Абоненты');
+    const registryBytes=XLSX.write(registryBook,{type:'buffer',bookType:'xlsx'});
+    const registryUpload='/api/admin/upload?resPath='+encodeURIComponent(SOCHI_RES_PATHS[0])+'&role=registry&filename='+encodeURIComponent('Расширенный список.xlsx');
+    const uploadedRegistry=await api(registryUpload,{method:'POST',
+      headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:registryBytes});
+    assert.equal(uploadedRegistry.status,200,await uploadedRegistry.text().catch(()=>'')); 
+    const askRegistry=async(action,payload={},resPath=SOCHI_RES_PATHS[0])=>
+      json('/api/registry',{action,resPath,payload},userCookie);
+    const registrySummary=await askRegistry('summary');
+    assert.equal(registrySummary.status,200);
+    assert.equal((await registrySummary.json()).result.count,2);
+    const searched=await askRegistry('search',{query:'123456',field:'meter'});
+    assert.equal(searched.status,200);
+    const found=(await searched.json()).result;
+    assert.equal(found.total,1);
+    assert.equal(found.records[0].fields.account,'000001');
+    const record=await askRegistry('record',{id:found.records[0].id});
+    assert.equal((await record.json()).result.fields.meter,'000123456');
+    assert.equal((await askRegistry('summary',{},SOCHI_RES_PATHS[1])).status,403);
     const saved=await json('/api/admin/analysis-settings',{settings:{red:60,amber:25}},adminCookie);
     assert.equal(saved.status,200);
     const read=await (await api('/api/analysis-settings',{headers:{Cookie:userCookie}})).json();
