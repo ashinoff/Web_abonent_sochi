@@ -105,3 +105,65 @@ test('preparation process detects XLSX by signature and keeps the old XLS parser
     assert.deepEqual(await preparationChildFlags(f.path, 'instant', '31.xlsx', 512), ['--max-old-space-size=128']);
   }
 });
+
+
+// The Sochi "Расширенный список" has a merged three-level 1C header.
+// A bad TT serial at row 9895 must not invalidate the registry; a bad
+// meter/LS/point identifier must never be silently rounded into a search key.
+function sochiHeaderRows({brokenMeter=false}={}) {
+  const top=Array(69).fill(''),middle=Array(69).fill(''),bottom=Array(69).fill('');
+  for(const [col,value] of [[0,'№ п/п'],[1,'ТУ'],[2,'Номер ТУСТЕК'],
+    [3,'Номер ТУ'],[4,'ЛС / ЛС СТЕК'],[5,'Наименование договора'],
+    [6,'Основные реквизиты'],[14,'Адрес точки учета'],[19,'Подключение'],
+    [23,'Прибор учета'],[31,'События'],[37,'Рассчитанные величины'],
+    [39,'Характеристики ТТ'],[61,'Характеристики ТН']])top[col]=value;
+  for(const [col,value] of [[24,'Номер счетчика'],[21,'ТП'],
+    [14,'Населенный пункт'],[15,'Улица'],[16,'Дом'],
+    [40,'Заводской номер ТТ (А)'],[47,'Заводской номер ТТ (В)'],
+    [54,'Заводской номер ТТ (С)'],[62,'Заводской номер ТН']])bottom[col]=value;
+  const first=Array(69).fill('');
+  Object.assign(first,{0:1,2:'00000102345',3:'2',4:'00000001001',
+    5:'Учебный абонент',14:'Сочи',15:'Тестовая',16:'10',
+    21:'ТП-100',24:'000000001234567',40:'Заводской ТТ 1'});
+  const damaged=Array(69).fill('');
+  Object.assign(damaged,{0:9892,2:'00000102345',3:'2',4:'00000001001',
+    5:'Тестовый абонент',14:'Сочи',15:'Тестовая',16:'12',
+    21:'ТП-100',24:brokenMeter?1234567890123456:'000000001234568',
+    40:1234567890123456});
+  const rows=[top,middle,bottom,first];
+  rows[9894]=damaged;
+  return rows;
+}
+function sochiFixture(t,{brokenMeter=false}={}){
+  return fixture(t,{Реестр:sochiHeaderRows({brokenMeter})},{
+    mutate(book){
+      book.Sheets.Реестр['!merges']=[
+        'A1:A3','B1:B3','C1:C3','D1:D3','E1:E3','F1:F3',
+        'X1:AE1','AN1:BI1'
+      ].map(XLSX.utils.decode_range);
+    }
+  });
+}
+test('Sochi three-level 69-column header: numeric long TT serial at row 9895 is a visible warning, not a failed registry',async t=>{
+  const f=await sochiFixture(t);
+  const warnings=await writeRegistryXLSX(f.path,f.output,'Расширенный список.xlsx');
+  const streamed=JSON.parse(await readFile(f.output,'utf8'));
+  assert.equal(streamed.sheets.length,1);
+  assert.equal(streamed.sheets[0].rows.length,2);
+  assert.equal(streamed.sheets[0].rows[1][0],9895);
+  assert.equal(streamed.sheets[0].layout.mapping.meter,24);
+  assert.equal(streamed.sheets[0].layout.mapping.account,4);
+  assert.ok(warnings.length>0);
+  assert.match(warnings.join('\n'),/Столбец AO.*Заводской номер ТТ.*9895/);
+  assert.deepEqual(streamed.warnings,warnings);
+  const fallback=prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx');
+  assert.deepEqual(streamed,fallback);
+  assert.equal(buildIndex(unpackRegistry(streamed)).records.length,2);
+});
+test('Sochi three-level header: damaged critical meter at row 9895 reports exact Y9895 cell',async t=>{
+  const f=await sochiFixture(t,{brokenMeter:true});
+  await assert.rejects(writeRegistryXLSX(f.path,f.output,'Расширенный список.xlsx'),
+    /Строка 9895: ячейка Y9895.*Номер счетчика.*Excel мог округлить/);
+  assert.throws(()=>prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx'),
+    /Строка 9895: ячейка Y9895.*Номер счетчика.*Excel мог округлить/);
+});
