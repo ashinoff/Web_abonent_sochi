@@ -103,6 +103,7 @@ export function createTpBalances(pack=null) {
       imbalance=complete?round(intakeSum-outgoingSum):null,
       pct=totalIntake>0?round(100*imbalance/totalIntake):null;
     const warning=[];
+    if(unassigned)warning.push('В файле «Приём» есть '+unassigned+' строк без ТП. Они не распределены между контурами и могут влиять на полноту баланса.');
     if(item.duplicates)warning.push('Повторяющихся номеров вводных ПУ: '+item.duplicates+'. Совпадающие строки учитываются один раз; конфликтующие месяцы исключены.');
     if(item.unknownMeters)warning.push('Строк без номера вводного ПУ: '+item.unknownMeters+'. При наличии значений соответствующий месяц исключён.');
     if(item.multipleTP)warning.push('Вводных ПУ с привязкой к нескольким ТП: '+item.multipleTP+'. Без дат переподключения их объёмы не распределяются.');
