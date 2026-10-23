@@ -12,7 +12,6 @@ import { createNotificationsHandler } from './user-notifications.mjs';
 import { createSochiAnalytics } from './sochi-analytics.mjs';
 import { createSochiRegistry } from './sochi-registry.mjs';
 import { receiveSochiWorkbook } from './sochi-import.mjs';
-import { buildSochiTemplate } from './sochi-template.mjs';
 import { preparationMemory } from './prepared-service.mjs';
 import { fault, superAdminConfig } from './accounts.mjs';
 import { sourceRoleKeys } from './public/source.js';
@@ -98,6 +97,9 @@ export function createSochiServer(options={}) {
         if(req.method!=='GET')throw fault('Метод не поддерживается.',405);
         const role=url.searchParams.get('role');
         if(!sourceRoleKeys.includes(role))throw fault('Выберите тип файла.');
+        // Do not load the heavy Excel library on every Sochi server start.
+        // Administrators use templates occasionally; normal API requests stay lightweight.
+        const { buildSochiTemplate }=await import('./sochi-template.mjs');
         const file=buildSochiTemplate(role);
         res.writeHead(200,{
           'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
