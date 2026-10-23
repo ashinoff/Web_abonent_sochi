@@ -1,6 +1,6 @@
 import { openSync, closeSync, writeSync } from 'node:fs';
 import * as XLSX from '@e965/xlsx';
-import { clean, detectLayout, identifierColumns, criticalIdentifierColumns, unsafeNumericIdentifier, longNumericIdentifier, identifierIssue, identifierWarnings, restoreIdentifier, isRegistryDataRow } from './public/core.js';
+import { clean, detectLayout, identifierColumns, longNumericIdentifier, identifierWarnings, restoreIdentifier, isRegistryDataRow } from './public/core.js';
 import { openStreamingWorkbook, parseXML, column, excelText, xmlError, MAX_CELL_BYTES, MAX_ENTRY_BYTES } from './xlsx-stream.mjs';
 
 const registryLimit = () => new Error('Реестр слишком большой: максимум 100 000 строк и 256 столбцов на лист.');
@@ -16,7 +16,7 @@ function cellValue(cell, content, strings, date1904) {
     ? XLSX.utils.aoa_to_sheet([[new Date(content)]], { date1904 }).A1?.v
     : Number(content);
   if (!Number.isFinite(value)) throw xmlError('неверное числовое значение ячейки.');
-  return { t: 'n', v: value, z };
+  return { t: 'n', v: value, z, raw: content.trim() };
 }
 
 function displayCell(cell, date1904) {
@@ -131,7 +131,7 @@ export async function writeRegistryXLSX(path, output, filename = '') {
   try {
     writer = new PackageWriter(output);
     writer.add('{"format":1,"role":"registry","sheets":[');
-    const skipped = [], warnings=identifierWarnings(), invalid={count:0,examples:[]}; let sheetCount = 0;
+    const skipped = [], warnings=identifierWarnings(); let sheetCount = 0;
     for (const sheet of workbook.info.sheets) {
       if (!sheet.path) continue;
       let layout;
@@ -141,32 +141,17 @@ export async function writeRegistryXLSX(path, output, filename = '') {
         skipped.push({ sheet: sheet.name, error: error.message }); continue;
       }
       if (!layout) continue;
-      const columns = identifierColumns(layout),critical=criticalIdentifierColumns(layout); let count = 0;
+      const columns = identifierColumns(layout); let count = 0;
       await readRows(workbook, sheet, { onRow(number, cells) {
         if (number <= layout.end + 1) return;
-        let invalidRow=false;
         const values = Array.from({ length: layout.labels.length }, (_, c) => {
-          const cell=cells[c];
-          const value = cell ? displayCell(cell, workbook.info.date1904) : '';
+          const cell=cells[c],value=cell?displayCell(cell,workbook.info.date1904):'';
           if(!columns.has(c))return clean(value);
-          if(unsafeNumericIdentifier(cell)){
-            if(critical.has(c)){
-              invalidRow=true;
-              invalid.count++;
-              if(invalid.examples.length<8)invalid.examples.push(identifierIssue(number,c,layout.labels[c]));
-            }else warnings.add(c,layout.labels[c],number);
-            // Non-safe integers cannot supply trustworthy key IDs. Secondary
-            // serials remain visible exactly as Excel rendered them.
-            return clean(value);
-          }
-          if(longNumericIdentifier(cell))
-            // A precisely representable 16-digit meter must remain searchable
-            // under its full number. Warn that the source Excel may have
-            // rounded the original input, without changing its stored digits.
-            warnings.add(c,layout.labels[c],number);
-          return clean(restoreIdentifier(value,cell,number,{column:c,label:layout.labels[c]}));
+          if(longNumericIdentifier(cell))warnings.add(c,layout.labels[c],number);
+          // Restore the exact numeric text written in XLSX XML, without
+          // fabricating any digits Excel lost before producing the export.
+          return clean(restoreIdentifier(value,cell));
         });
-        if(invalidRow)return;
         if (!isRegistryDataRow(values) || !values[layout.mapping.meter] && !values[layout.mapping.account]) return;
         if (layout.flattened || layout.mapping.meter === undefined || layout.mapping.account === undefined) throw manualHeader();
         if (!count) {
@@ -178,7 +163,6 @@ export async function writeRegistryXLSX(path, output, filename = '') {
       if (count) writer.add(']}');
       else skipped.push({ sheet: sheet.name, error: 'Нет строк с номером ПУ или ЛС.' });
     }
-    if(invalid.count)throw new Error(`Проверка ключевых идентификаторов: ${invalid.count} некорректных ячеек. ${invalid.examples.join(' ')}${invalid.count>invalid.examples.length?` И ещё ${invalid.count-invalid.examples.length}.`:''}`);
     if (!sheetCount) throw new Error(skipped[0]?.error || 'В файле нет доступных строк реестра.');
     const notes=warnings.list();
     writer.add('],"skipped":' + JSON.stringify(skipped) + (notes.length?',"warnings":'+JSON.stringify(notes):'') + '}');

@@ -90,28 +90,41 @@ export function identifierColumns(layout) {
   for (const [c, label] of layout.labels.entries()) if (/номер|телефон|лицевой|^лс/i.test(label)) columns.add(c);
   return columns;
 }
-// Only these identifiers determine who/what a registry record belongs to.
-// TT/TN manufacturer serials, phone numbers and other "номер" columns remain
-// visible in the full card but must not veto the whole registry's import.
-export function criticalIdentifierColumns(layout) {
-  return new Set(['meter','account','point','pointNumber'].map(key=>layout.mapping[key]).filter(Number.isInteger));
-}
-// A 16-digit identifier can still be an *exact* integer in JavaScript:
-// 6003481006073610 is below Number.MAX_SAFE_INTEGER (9007199254740991).
-// Never reject it solely for having more than 15 digits. Excel's original
-// numeric input may nevertheless have been rounded, so report a warning.
+// Long numeric serials are not a reason to discard tens of thousands of
+// otherwise valid subscribers. The stored XLSX XML number is authoritative
+// for what this file contains, although Excel may already have rounded the
+// original data before saving it.
 export const unsafeNumericIdentifier = cell => cell?.t === 'n' && Number.isInteger(cell.v) &&
   !Number.isSafeInteger(cell.v);
 export const longNumericIdentifier = cell => cell?.t === 'n' && Number.isInteger(cell.v) &&
   Math.abs(cell.v) >= 1e15;
-export function identifierIssue(row,column,label) {
-  const position=Number.isInteger(column)?` ячейка ${columnName(column)}${row}${label?` («${label}»)`:''}:`:'';
-  return `Строка ${row}:${position} длинный номер хранится в Excel как число. Нужен исходный текстовый номер: Excel мог округлить его.`;
+
+// Expand Excel's stored decimal/scientific notation using string operations,
+// never IEEE-754 number arithmetic. This preserves the numeric *value stored
+// in the XLSX XML* even if JS Number cannot represent it precisely. It cannot
+// recover digits Excel rounded before writing the XML.
+export function storedExcelInteger(raw) {
+  const match=/^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(String(raw??'').trim());
+  if(!match)return null;
+  const [,sign,whole,fraction='',exponent='0']=match;
+  const shift=Number(exponent),digits=whole+fraction;
+  if(!Number.isSafeInteger(shift)||Math.abs(shift)>128||digits.length>128)return null;
+  const point=whole.length+shift;
+  let integer;
+  if(point>=digits.length)integer=digits+'0'.repeat(point-digits.length);
+  else if(point>0) {
+    if(!/^0*$/.test(digits.slice(point)))return null;
+    integer=digits.slice(0,point);
+  }else {
+    if(!/^0*$/.test(digits))return null;
+    integer='0';
+  }
+  integer=integer.replace(/^0+(?=\d)/,'');
+  return sign==='-'&&integer!=='0'?'-'+integer:integer;
 }
-// Aggregate only metadata about all potentially rounded 16+ digit numeric
-// identifiers, including key meter/account numbers when their integer value
-// is representable precisely. Never claim that the original Excel input can
-// be recovered from the resulting cell.
+// Aggregate short warnings by source column instead of blocking an entire
+// registry for one long numeric meter. Do not imply that the pre-Excel number
+// has been verified or that previously rounded digits can be recovered.
 export function identifierWarnings() {
   const affected=new Map();
   return {
@@ -123,32 +136,35 @@ export function identifierWarnings() {
     },
     list() {
       return [...affected].map(([column,item])=>
-        `Столбец ${columnName(column)} («${item.label}»): ${item.count} длинных числовых номеров сохранены без изменения прочитанного значения; Excel мог округлить их при экспорте. Примеры строк: ${item.examples.join(', ')}. При необходимости сверяйте с первичной системой.`);
+        `Столбец ${columnName(column)} («${item.label}»): ${item.count} длинных числовых номеров импортированы в виде, записанном в Excel. Исходные цифры могли быть округлены при экспорте. Примеры строк: ${item.examples.join(', ')}. При необходимости сверьте с первичной системой.`);
     },
   };
 }
-export function restoreIdentifier(value, cell, row, {column,label}={}) {
-  if (cell?.t !== 'n' || !Number.isInteger(cell.v)) return value;
-  if (unsafeNumericIdentifier(cell)) throw new Error(identifierIssue(row,column,label));
-  return /e[+-]\d+/i.test(String(value)) || !cell.z || cell.z === 'General' ? String(cell.v) : value;
+export function restoreIdentifier(value,cell) {
+  if(cell?.t!=='n'||!Number.isInteger(cell.v))return value;
+  // In streaming XLSX, cell.raw is the actual XML <v> text; for legacy XLS
+  // the parser can only supply its decoded numeric representation.
+  const stored=storedExcelInteger(cell.raw??String(cell.v));
+  if(unsafeNumericIdentifier(cell)) {
+    if(!stored)return clean(value)||String(cell.v);
+    // Preserve a deliberate all-zero Excel formatting mask for serials.
+    return /^0+$/.test(cell.z||'')&&cell.z.length>stored.length
+      ?stored.padStart(cell.z.length,'0'):stored;
+  }
+  return /e[+-]\d+/i.test(String(value)) || !cell.z || cell.z==='General'
+    ?stored??String(cell.v):value;
 }
 export function isRegistryDataRow(values) {
   return values.some(Boolean) && headerScore(values) < 8 && !/^(итого|всего)(\s|$)/i.test(values[0]);
 }
-export function restoreNumericIdentifiers(matrix, worksheet, layout, warnings=identifierWarnings()) {
-  // Excel's General format switches long IDs to scientific notation.
-  // Search keys must be exact; peripheral TT/TN numbers are kept *as displayed*
-  // with a warning instead of discarding 44k good consumer rows.
-  const columns=identifierColumns(layout),critical=criticalIdentifierColumns(layout);
+export function restoreNumericIdentifiers(matrix,worksheet,layout,warnings=identifierWarnings()) {
+  // XLS / non-streaming fallback. Preserve the numeric value available from
+  // the decoder, flag questionable long identifiers, never reject the book.
+  const columns=identifierColumns(layout);
   for(let r=layout.end+1;r<matrix.length;r++)for(const c of columns) {
     const cell=worksheet['!data']?worksheet['!data'][r]?.[c]:worksheet[`${columnName(c)}${r+1}`];
-    if(unsafeNumericIdentifier(cell) && !critical.has(c)) {
-      warnings.add(c,layout.labels[c],r+1);
-      continue;
-    }
-    if(longNumericIdentifier(cell) && !unsafeNumericIdentifier(cell))
-      warnings.add(c,layout.labels[c],r+1);
-    const value=restoreIdentifier(matrix[r]?.[c],cell,r+1,{column:c,label:layout.labels[c]});
+    if(longNumericIdentifier(cell))warnings.add(c,layout.labels[c],r+1);
+    const value=restoreIdentifier(matrix[r]?.[c],cell);
     if(value!==matrix[r]?.[c])matrix[r][c]=value;
   }
   return matrix;
