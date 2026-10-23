@@ -72,11 +72,17 @@ test('one header per worksheet, skipped sheets and empty registry sheets match t
   assert.deepEqual(JSON.parse(await readFile(f.output, 'utf8')), prepareWorkbook(f.bytes, 'registry'));
 });
 
-test('numeric identifiers damaged by Excel fail before saving a usable package and clean up strings', async t => {
+test('unsafe 17-digit numeric meter is imported, indexed and flagged without altering existing search records', async t => {
   for (const z of ['General', '0000000000000000']) {
     const f = await fixture(t, { Реестр: [simpleHeader, [10000000000000000, '0001']] }, { mutate: book => { book.Sheets.Реестр.A2.z = z; } });
-    await assert.rejects(writeRegistryXLSX(f.path, f.output), /Строка 2:.*Excel мог округлить/);
-    assert.throws(() => prepareWorkbook(f.bytes, 'registry'), /Строка 2:.*Excel мог округлить/);
+    const warnings=await writeRegistryXLSX(f.path,f.output,'Расширенный список.xlsx');
+    const pack=JSON.parse(await readFile(f.output,'utf8'));
+    assert.equal(pack.sheets[0].rows.length,1);
+    assert.equal(pack.sheets[0].rows[0][1][0],'10000000000000000');
+    assert.deepEqual(warnings,pack.warnings);
+    assert.deepEqual(pack,prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx'));
+    assert.equal(search(buildIndex(unpackRegistry(pack)),{query:'10000000000000000'}).total,1);
+    assert.match(warnings.join(' '),/Столбец A.*Номер счетчика/);
     assert.ok(!(await readdir(f.dir)).some(name => name.startsWith('xlsx-strings-')));
   }
 });
@@ -160,12 +166,15 @@ test('Sochi three-level 69-column header: numeric long TT serial at row 9895 is 
   assert.deepEqual(streamed,fallback);
   assert.equal(buildIndex(unpackRegistry(streamed)).records.length,2);
 });
-test('Sochi three-level header: damaged critical meter at row 9895 reports exact Y9895 cell',async t=>{
+test('Sochi three-level header accepts a 17-digit numeric meter at Y9895 with warning',async t=>{
   const f=await sochiFixture(t,{brokenMeter:true});
-  await assert.rejects(writeRegistryXLSX(f.path,f.output,'Расширенный список.xlsx'),
-    /Строка 9895: ячейка Y9895.*Номер счетчика.*Excel мог округлить/);
-  assert.throws(()=>prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx'),
-    /Строка 9895: ячейка Y9895.*Номер счетчика.*Excel мог округлить/);
+  const warnings=await writeRegistryXLSX(f.path,f.output,'Расширенный список.xlsx');
+  const result=JSON.parse(await readFile(f.output,'utf8'));
+  assert.equal(result.sheets[0].rows[1][0],9895);
+  assert.equal(result.sheets[0].rows[1][1][24],'10000000000000000');
+  assert.match(warnings.join(' '),/Столбец Y.*Номер счетчика.*9895/);
+  assert.deepEqual(result,prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx'));
+  assert.equal(search(buildIndex(unpackRegistry(result)),{query:'10000000000000000'}).total,1);
 });
 
 test('Sochi 1C three-level header imports verified numeric meter 6003481006073610 at Y9895',async t=>{
@@ -177,5 +186,36 @@ test('Sochi 1C three-level header imports verified numeric meter 600348100607361
   assert.ok(warnings.some(message=>/Столбец Y.*Номер счетчика.*9895/.test(message)));
   const index=buildIndex(unpackRegistry(pack));
   assert.equal(search(index,{query:'6003481006073610',field:'meter'}).total,1);
+  assert.deepEqual(pack,prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx'));
+});
+
+test('Sochi importer accepts three long numeric meters at Y11631, Y25267 and Y40018 in one workbook',async t=>{
+  const rows=sochiHeaderRows(),numbers=[
+    [11631,10000000000000000],
+    [25267,20000000000000000],
+    [40018,30000000000000000],
+  ];
+  for(const [row,number] of numbers) {
+    const record=Array(69).fill('');
+    record[0]=row;record[4]='230703231250';record[5]='Тестовый потребитель';
+    record[14]='Учебный город';record[15]='Тестовая улица';
+    record[21]='ТП-100';record[24]=number;
+    rows[row-1]=record;
+  }
+  const f=await fixture(t,{Реестр:rows},{
+    mutate(book){book.Sheets.Реестр['!merges']=[
+      'A1:A3','B1:B3','C1:C3','D1:D3','E1:E3','F1:F3','X1:AE1','AN1:BI1',
+    ].map(XLSX.utils.decode_range);}
+  });
+  const warnings=await writeRegistryXLSX(f.path,f.output,'Расширенный список.xlsx');
+  const pack=JSON.parse(await readFile(f.output,'utf8'));
+  assert.equal(pack.sheets[0].rows.length,5);
+  const byRow=new Map(pack.sheets[0].rows);
+  for(const [row,number] of numbers) {
+    assert.equal(byRow.get(row)[24],String(number));
+    assert.equal(search(buildIndex(unpackRegistry(pack)),{query:String(number)}).total,1);
+    assert.match(warnings.join(' '),new RegExp('\\b'+row+'\\b'));
+  }
+  assert.match(warnings.join(' '),/Столбец Y.*Номер счетчика/);
   assert.deepEqual(pack,prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx'));
 });

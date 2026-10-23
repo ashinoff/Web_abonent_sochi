@@ -93,19 +93,23 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     const errorsView=await (await api('/api/admin/database',{headers:{Cookie:adminCookie}})).json();
     assert.ok(errorsView.events.some(event=>event.code==='upload_failed'&&event.res_path===SOCHI_RES_PATHS[0]),
       'failed imports should be visible in admin database analysis');
-    // Known workbook errors go to the authenticated UI with an exact Excel
-    // coordinate, instead of an unhelpful generic HTTP 500 message.
+    // Long numeric meter cells must no longer veto whole-book imports.
+    // Preserve the stored XLSX number and expose nonblocking warnings.
     const badNumber=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(badNumber,XLSX.utils.aoa_to_sheet([
       ['ЛС','Номер счетчика'],['000001',10000000000000000],
     ]),'Реестр');
     const registryUploadRoute='/api/admin/upload?resPath='+encodeURIComponent(SOCHI_RES_PATHS[0])+'&role=registry&filename='+encodeURIComponent('Расширенный список.xlsx');
-    const rejected=await api(registryUploadRoute,{method:'POST',
+    const acceptedLong=await api(registryUploadRoute,{method:'POST',
       headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
       body:XLSX.write(badNumber,{type:'buffer',bookType:'xlsx'})});
-    const reason=await rejected.json();
-    assert.equal(rejected.status,422,JSON.stringify(reason));
-    assert.match(reason.error,/Строка 2: ячейка B2.*Номер счетчика.*Excel мог округлить/);
+    const longResult=await acceptedLong.json();
+    assert.equal(acceptedLong.status,200,JSON.stringify(longResult));
+    assert.match(longResult.warnings?.join(' ')||'',/Столбец B.*Номер счетчика/);
+    const longQuery=await json('/api/registry',{resPath:SOCHI_RES_PATHS[0],
+      action:'search',payload:{field:'meter',query:'10000000000000000'}},userCookie);
+    assert.equal(longQuery.status,200);
+    assert.equal((await longQuery.json()).result.total,1);
 
     // Secondary TT factory serials are still visible but are not keys for
     // subscriber search. The import succeeds with an integrity warning.

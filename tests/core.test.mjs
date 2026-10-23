@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from '@e965/xlsx';
-import { parseMatrix, buildIndex, search, detectLayout, restoreNumericIdentifiers, identifierWarnings, unsafeNumericIdentifier, longNumericIdentifier, listTPs, metersByTP, analysisRecords } from '../public/core.js';
+import { parseMatrix, buildIndex, search, detectLayout, restoreNumericIdentifiers, identifierWarnings, unsafeNumericIdentifier, longNumericIdentifier, storedExcelInteger, restoreIdentifier, listTPs, metersByTP, analysisRecords } from '../public/core.js';
 import { demo } from '../public/demo.js';
 test('analysis registry transfer retains report address and provenance while excluding phones, notes and unrelated fields',()=>{
   const source=parseMatrix([['ЛС','Номер ПУ','ТУ','Адрес','Телефон','Примечание','Стороннее поле'],['001','0002','Точка','Город Тестовый, улица Учебная, 1','12345','Длинное примечание','Лишнее значение']],{file:'Тестовый реестр.xlsx',sheet:'Учебный лист'});
@@ -75,10 +75,27 @@ test('real XLSX decoding preserves padded and long numeric identifiers', () => {
   const r = parseMatrix(matrix).records[0];
   assert.equal(r.fields.account, '123456789012'); assert.equal(r.fields.meter, '00012345');
 });
-test('reject rounded numeric IDs instead of fabricating original values', () => {
-  const ws = XLSX.utils.aoa_to_sheet([['ЛС','Номер счетчика'], [10000000000000000, 'ABC']]);
-  const matrix = XLSX.utils.sheet_to_json(ws, {header:1,raw:false});
-  assert.throws(() => restoreNumericIdentifiers(matrix, ws, detectLayout(matrix)), /Excel мог округлить/);
+test('import long numeric meter IDs without blocking the book; flag risky formats', () => {
+  const ws=XLSX.utils.aoa_to_sheet([['ЛС','Номер счетчика'],['000001',10000000000000000]]);
+  const matrix=XLSX.utils.sheet_to_json(ws,{header:1,raw:false});
+  const warnings=identifierWarnings();
+  restoreNumericIdentifiers(matrix,ws,detectLayout(matrix),warnings);
+  const index=buildIndex([parseMatrix(matrix)]);
+  assert.equal(index.records.length,1);
+  assert.equal(index.records[0].fields.meter,'10000000000000000');
+  assert.equal(search(index,{query:'10000000000000000'}).total,1);
+  assert.match(warnings.list().join(' '),/Столбец B.*Номер счетчика.*Excel.*округлены/);
+});
+test('streamed numeric XML text is preserved despite JS Number rounding', () => {
+  const original='9876543210123456789',approx=Number(original);
+  assert.equal(Number.isSafeInteger(approx),false);
+  assert.equal(storedExcelInteger(original),original);
+  assert.equal(storedExcelInteger('9.876543210123456789E+18'),original);
+  assert.equal(storedExcelInteger('1.2345e+3'),null);
+  assert.equal(storedExcelInteger('1.2345e+6'),'1234500');
+  assert.equal(storedExcelInteger('1e+999'),null);
+  assert.equal(restoreIdentifier('9.87654E+18',{t:'n',v:approx,z:'General',raw:original}),original);
+  assert.equal(restoreIdentifier('9.87654E+18',{t:'n',v:approx,z:'General',raw:'9.876543210123456789E+18'}),original);
 });
 test('confirmed 6003481006073610 stays intact even when the XLSX cell is numeric', () => {
   const number=6003481006073610;
