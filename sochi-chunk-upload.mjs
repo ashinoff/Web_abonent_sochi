@@ -108,7 +108,7 @@ export function createSochiChunkUploads({
       session.busy=false;
     }
   }
-  async function complete({actor,uploadId,save}) {
+  async function complete({actor,uploadId,save,onError=async()=>{}}) {
     const session=owned(actor,uploadId);
     if (session.busy) throw fault('Передача файла ещё выполняется.',409,'upload_busy');
     if (session.received !== session.size)
@@ -120,6 +120,12 @@ export function createSochiChunkUploads({
         hash:session.hash.digest('hex'),
       });
       return await save(session,received);
+    } catch(error) {
+      // Preserve the RES and file role for the audit log even when the parser
+      // fails before the database save callback runs.
+      try {await onError(session,error);}
+      catch(logError) {console.warn('Sochi upload audit log failed:',logError.message);}
+      throw error;
     } finally {
       session.busy=false;
       await discard(session);
