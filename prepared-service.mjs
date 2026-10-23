@@ -372,3 +372,12 @@ export function createPreparedService({ source, store, yandex }) {
     cancelRes(path){for(const item of active.values())if(path==='/'||resScope(item.path)===path)item.controller.abort();},
   };
 }
+
+// Sochi imports only local Excel in a bounded parser subprocess.
+export async function prepareUploadedXlsx(path,output,role,filename,signal){
+  const {containerMB}=await memoryBudget();
+  await runLimitedChild([path,output,role,filename],containerMB,signal);
+  const {packageMB}=preparationLimits(containerMB);
+  if((await stat(output)).size>packageMB*1048576)throw new Error('Подготовленный пакет Excel превышает лимит '+packageMB+' МБ.');
+  return readFile(output,'utf8');
+}
