@@ -45,8 +45,18 @@ test('UI keeps selection responsive, preserves ready data on stop and manages on
   t.mock.method(globalThis, 'clearTimeout', timer => { timers.delete(timer); clearTimer(timer); });
   const page = new Window({ url:'https://app.example.test/', settings:{ disableCSSFileLoading:true, disableJavaScriptFileLoading:true } });
   page.document.write(await readFile(new URL('../public/index.html', import.meta.url), 'utf8'));
-  // This suite simulates the original two-enterprise interface. The Sochi page intentionally
-  // omits this control, so restore it exclusively inside the legacy test fixture.
+  // This suite exercises the multi-enterprise *legacy* client. Sochi no longer
+  // renders any enterprise choice. Install only the old controls here, never
+  // in the production HTML, to retain coverage of asynchronous legacy loads.
+  const legacyPicker=page.document.createElement('button');
+  legacyPicker.type='button';legacyPicker.id='district-button';
+  const legacyLabel=page.document.createElement('span');
+  legacyLabel.id='district-label';legacyPicker.append(legacyLabel);
+  page.document.querySelector('main').prepend(legacyPicker);
+  const legacyDialog=page.document.createElement('dialog');
+  legacyDialog.id='enterprise-dialog';
+  legacyDialog.innerHTML='<button type="button" class="close-dialog">Закрыть</button><div id="folder-list" class="choice-list"></div>';
+  page.document.body.append(legacyDialog);
   const legacyBack = page.document.createElement('button');
   legacyBack.type = 'button';
   legacyBack.dataset.openEnterprises = '';

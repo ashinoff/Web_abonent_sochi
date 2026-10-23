@@ -6,7 +6,7 @@ import { Window } from 'happy-dom';
 import { IDBFactory } from 'fake-indexeddb';
 import { SOCHI_ENTERPRISE_PATH, SOCHI_RES_PATHS } from '../public/sochi-config.js';
 
-const expected=SOCHI_RES_PATHS[0],source='sochi:local:v1';
+const expected=SOCHI_RES_PATHS[0],other=SOCHI_RES_PATHS[1],source='sochi:local:v1';
 async function until(fn,name){
   for(let i=0;i<1000;i++){if(fn())return;await delay(5);}
   assert.fail('Timed out: '+name);
@@ -24,10 +24,10 @@ test('Sochi browser sees one enterprise, scoped RES, server search and no automa
   const $=selector=>page.document.querySelector(selector);
   const callPaths=[];
   const directory={
-    [SOCHI_ENTERPRISE_PATH]:SOCHI_RES_PATHS.slice(0,1).map(path=>({type:'dir',path,name:path.split('/').at(-1)})),
+    [SOCHI_ENTERPRISE_PATH]:SOCHI_RES_PATHS.slice(0,2).map(path=>({type:'dir',path,name:path.split('/').at(-1)})),
     [expected]:['Расширенный список.xlsx','ПО.xlsx'].map(name=>({type:'file',path:expected+'/'+name,name,size:5000})),
   };
-  const user={id:'test-sochi-user',login:'resident',name:'Сотрудник РЭС',active:true,role:'user',resPaths:[expected]};
+  const user={id:'test-sochi-user',login:'resident',name:'Сотрудник РЭС',active:true,role:'user',resPaths:[expected,other]};
   t.mock.method(globalThis,'fetch',async(input,opts={})=>{
     const url=new URL(input),path=url.pathname;
     callPaths.push(path);
@@ -75,9 +75,18 @@ test('Sochi browser sees one enterprise, scoped RES, server search and no automa
   globalThis.Worker=DummyWorker;
   t.after(async()=>{await delay(250);page.dispatchEvent(new page.Event('pagehide'));await delay(20);await page.happyDOM.close();});
   await import('../public/app.js?sochi-ui-test');
-  await until(()=>$('#res-list').querySelectorAll('[data-res]').length===1,'automatic Sochi enterprise');
-  assert.equal($('#district-button').disabled,true);
-  assert.equal(page.document.querySelector('[data-open-enterprises]'),null,'the obsolete other enterprise button must be removed');
+  await until(()=>$('#res-list').querySelectorAll('[data-res]').length===2,'automatic Sochi RES directory');
+  assert.equal($('#district-button'),null,'enterprise picker must be removed entirely');
+  assert.equal($('#enterprise-dialog'),null,'enterprise modal must be removed entirely');
+  assert.equal(page.document.querySelector('[data-open-enterprises]'),null,'no back button to another enterprise');
+  assert.ok($('#res-button').closest('.header-inner'),'RES selection belongs to the site header');
+  assert.equal($('.header-unit')?.textContent.includes('Сочинский ПЭС'),true);
+  assert.ok($('#search-submit').closest('.search-inline'),'search magnifier belongs beside the search field');
+  assert.equal($('#search-submit').querySelectorAll('svg').length,1);
+  assert.equal($('#tp-open').closest('#search-form'),null,'TP registry cannot be part of subscriber search');
+  assert.equal($('#contour-open').closest('#search-form'),null,'TP contour analysis cannot be part of subscriber search');
+  assert.notEqual($('#tp-open').closest('.tp-feature-card'),$('#contour-open').closest('.tp-feature-card'));
+
   assert.equal($('#admin-upload-open').hidden,true,'regular employee must not see administrator upload shortcut');
   assert.equal($('#settings-open').hidden,true,'admin settings must be hidden from staff');
   assert.equal($('#db-health-tab').hidden,true,'DB error analysis must be admin-only');
@@ -88,17 +97,28 @@ test('Sochi browser sees one enterprise, scoped RES, server search and no automa
   assert.equal($('#settings-dialog').open,false,'employee offline workflow does not open admin settings');
   assert.equal($('#staff-offline-map-slot').hidden,false);
   $('#offline-dialog').close();
-  assert.equal($('#district-label').textContent,'Сочинское предприятие электрических сетей');
-  assert.equal($('#res-list').querySelectorAll('[data-res]').length,1);
+  assert.equal($('#res-list').querySelectorAll('[data-res]').length,2);
   $('#res-button').click();
   $('#res-list').querySelector('[data-res]').click();
   await until(()=>$('#registry-indicator').dataset.state==='on'&&$('#consumption-indicator').dataset.state==='on','server-side data ready');
   assert.equal($('#source-files').querySelector('[data-choose-source]').hidden,true);
   assert.equal($('#analysis-settings').querySelector('[data-setting]')?.disabled,true);
+  assert.equal($('#base-indicator').dataset.state,'on','base must reflect a successful authorized DB catalog read');
+  assert.equal($('#incoming-indicator').dataset.state,'off','incoming is missing from the selected RES');
+  assert.match($('#registry-indicator').getAttribute('aria-label'),/Адлерский РЭС/);
   $('#search-input').value='000123';
   $('#search-form').dispatchEvent(new page.Event('submit',{bubbles:true,cancelable:true}));
   await until(()=>$('#results').textContent.includes('Тестовый абонент'),'server-side search results');
   assert.equal(callPaths.includes('/api/prepared'),false,'online page must not bulk-download registry or consumption');
   assert.equal(callPaths.includes('/api/resources'),false,'no Yandex resource request');
   assert.equal(callPaths.includes('/api/registry'),true);
+  $('#res-button').click();
+  $('#res-list').querySelectorAll('[data-res]')[1].click();
+  await until(()=>$('#res-label').textContent==='Краснополянский РЭС'&&
+    $('#registry-indicator').dataset.state==='off'&&
+    $('#consumption-indicator').dataset.state==='off','second RES has missing data');
+  assert.equal($('#base-indicator').dataset.state,'on','global database stays connected while this RES lacks files');
+  assert.match($('#registry-indicator').getAttribute('aria-label'),/Краснополянский РЭС/);
+  assert.equal($('#settings-dialog').open,false,'missing staff data must not open the admin settings');
+  assert.match($('#results').textContent,/Реестр не подключён/);
 });
