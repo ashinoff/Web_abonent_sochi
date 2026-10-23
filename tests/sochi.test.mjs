@@ -255,8 +255,8 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     assert.equal(monthlySaved.status,200,await monthlySaved.text().catch(()=>'')); 
     const beforeBalance=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[0],action:'analysisTP',tp:'ТП-1'},userCookie);
     assert.equal(beforeBalance.status,200);
-    assert.equal((await beforeBalance.json()).result.balance.status,'no-tp',
-      'previously loaded intake references a different TP');
+    assert.equal((await beforeBalance.json()).result.balance.status,'legacy',
+      'previous generic workbook replaced the intake, so no monthly balance is available');
 
     // Replace the intake with two input PUs on TP-1 and verify a live scoped
     // balance after the intake revision invalidates the analysis cache.
