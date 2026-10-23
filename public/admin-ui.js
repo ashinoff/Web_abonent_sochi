@@ -1,5 +1,6 @@
 import { formatBytes } from './offline-copies.js';
 import { SOCHI_RES_NAMES, SOCHI_RES_PATHS, SOCHI_ROLES } from './sochi-config.js';
+import { transferSochiExcel } from './sochi-upload-transfer.js';
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const roleName={user:'Пользователь',admin:'Администратор',superadmin:'Суперадминистратор'};
@@ -14,8 +15,9 @@ const templateDescriptions={
   instant:'Журнал 31: токи, напряжения, мощности и cos φ.',
   events:'Журнал 46: даты и описания событий по ПУ.',
 };
-export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=>fetch(...args)}){
+export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=null,xhrFactory=null}){
   const $=selector=>document.querySelector(selector),panel=$('#admin-settings'),healthPanel=$('#db-health-settings');
+  const request=fetcher||((...args)=>fetch(...args));
   let accounts=[],database=null,editing=null,loading=false,version=0;
   const resChecks=$('#admin-res-checkboxes'),resBlock=$('#admin-user-res-scopes');
   if(resChecks)resChecks.innerHTML=SOCHI_RES_PATHS.map((path,i)=>
@@ -38,7 +40,7 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
   function allowed(){return ['admin','superadmin'].includes(account()?.role);}
   async function api(path,method='GET',body){
     if(!navigator.onLine)throw new Error('Для администрирования нужна связь.');
-    const response=await fetcher(new URL('./api/admin/'+path,location.href),{method,credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(20000),...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
+    const response=await request(new URL('./api/admin/'+path,location.href),{method,credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(20000),...(body?{headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
     const data=await response.json();if(!response.ok)throw new Error(data.error||'Не удалось выполнить действие.');return data;
   }
   function form(user=null){
@@ -150,32 +152,90 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
   $('#admin-clear-database').addEventListener('click',event=>{if(window.confirm('Очистить ВСЕ подготовленные пакеты текущего источника и приостановить всю загрузку? Учётные записи и пользовательские отметки сохранятся.'))void action(event.currentTarget,async()=>{await api('clear-data','POST',{resPath:'/',confirm:true});onDatabaseChanged();});});
   $('#admin-clear-events').addEventListener('click',event=>{if(window.confirm('Очистить журнал ошибок и действий?'))void action(event.currentTarget,()=>api('clear-events','POST',{}));});
   $('#admin-catalog-refresh').addEventListener('click',event=>{void refresh();});
-  $('#admin-upload-form')?.addEventListener('submit',async event=>{
-    event.preventDefault();
-    if(!allowed())return;
-    const button=$('#admin-upload-submit'),file=$('#admin-upload-file').files[0];
-    const resPath=uploadRes.value,role=uploadRole.value;
-    if(!navigator.onLine){status('#admin-upload-message','Для загрузки Excel требуется подключение к серверу.');return;}
-    if(!SOCHI_RES_PATHS.includes(resPath)||!Object.hasOwn(SOCHI_ROLES,role)){status('#admin-upload-message','Выберите РЭС и тип файла.');return;}
+  const fileInput=$('#admin-upload-file'),uploadButton=$('#admin-upload-submit');
+  const selected=$('#admin-upload-selected'),progress=$('#admin-upload-progress'),
+    progressBar=$('#admin-upload-progress-bar');
+  let uploadBusy=false;
+  function selectedFile(file){
+    selected.hidden=!file;
     if(!file)return;
-    if(!/\.(xls|xlsx)$/i.test(file.name)){status('#admin-upload-message','Выберите файл Excel в формате XLS или XLSX.');return;}
-    if(file.size>80*1048576){status('#admin-upload-message','Файл больше 80 МБ.');return;}
-    button.disabled=true;
-    status('#admin-upload-message','Загружаем и обрабатываем Excel на сервере. Не закрывайте страницу.',true);
+    $('#admin-upload-selected-name').textContent=file.name;
+    const resName=SOCHI_RES_NAMES[SOCHI_RES_PATHS.indexOf(uploadRes.value)]||'РЭС не выбрана';
+    $('#admin-upload-selected-info').textContent=formatBytes(file.size)+' · '+resName+' · '+(SOCHI_ROLES[uploadRole.value]||'Тип не выбран');
+  }
+  function progressState(stage,label,percentage=null){
+    progress.hidden=false;
+    progress.dataset.stage=stage;
+    $('#admin-upload-progress-label').textContent=label;
+    $('#admin-upload-progress-pct').textContent=percentage==null?'':percentage+'%';
+    // Missing value gives a native indeterminate bar while PostgreSQL parses
+    // the uploaded bytes; a sent payload is not the same as a saved package.
+    if(percentage==null)progressBar.removeAttribute('value');
+    else progressBar.value=percentage;
+  }
+  function lockUpload(locked){
+    uploadBusy=locked;
+    for(const control of [fileInput,uploadRes,uploadRole,uploadButton])control.disabled=locked;
+    uploadButton.textContent=locked?'Загрузка выполняется…':fileInput.files?.length?'Повторить загрузку':'Загрузить Excel в базу';
+  }
+  async function submitUpload(){
+    if(uploadBusy||!allowed())return;
+    const file=fileInput.files?.[0],resPath=uploadRes.value,role=uploadRole.value;
+    if(!file){status('#admin-upload-message','Сначала выберите Excel на компьютере.');return;}
+    selectedFile(file);
+    if(!navigator.onLine){status('#admin-upload-message','Нет связи с сервером. Выбранный файл сохранён для повторной попытки.');return;}
+    if(!SOCHI_RES_PATHS.includes(resPath)||!Object.hasOwn(SOCHI_ROLES,role)){
+      status('#admin-upload-message','Выберите РЭС и тип файла перед загрузкой.');return;
+    }
+    if(!/\.(xls|xlsx)$/i.test(file.name)){
+      status('#admin-upload-message','Допустимы только файлы XLS и XLSX.');return;
+    }
+    if(!file.size||file.size>80*1048576){
+      status('#admin-upload-message',file.size?'Файл превышает лимит 80 МБ.':'Нельзя загрузить пустой файл.');return;
+    }
+    // Selecting a file is an explicit upload action. The button remains a
+    // retry mechanism, so no hidden second click is required.
+    lockUpload(true);
+    progressState('sending','Передаём файл на сервер…',0);
+    status('#admin-upload-message','Загрузка началась: '+file.name+'. Не закрывайте страницу.',true);
     try{
       const url=new URL('./api/admin/upload',location.href);
-      url.searchParams.set('resPath',resPath);url.searchParams.set('role',role);url.searchParams.set('filename',file.name);
-      const response=await fetcher(url,{method:'POST',credentials:'same-origin',cache:'no-store',
-        headers:{'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:file});
-      const result=await response.json();
-      if(!response.ok)throw new Error(result.error||'Сервер не принял файл.');
+      url.searchParams.set('resPath',resPath);
+      url.searchParams.set('role',role);
+      url.searchParams.set('filename',file.name);
+      await transferSochiExcel(url,file,{
+        fetcher, ...(xhrFactory?{xhrFactory}:{}),
+        onProgress(loaded,total){
+          progressState('sending','Передаём файл на сервер…',Math.min(100,Math.round(loaded/total*100)));
+        },
+        onTransferred(){
+          progressState('processing','Файл передан. Проверяем и сохраняем данные в PostgreSQL…');
+          status('#admin-upload-message','Файл принят на обработку. Это может занять несколько минут.',true);
+        },
+      });
+      progressState('done','Обработка завершена, данные сохранены.',100);
       const resName=SOCHI_RES_NAMES[SOCHI_RES_PATHS.indexOf(resPath)];
       status('#admin-upload-message','Готово: '+file.name+'. Обновлён источник «'+SOCHI_ROLES[role]+'» для '+resName+'.');
-      $('#admin-upload-file').value='';
+      fileInput.value='';
       onDatabaseChanged();
       await refresh();
-    }catch(error){status('#admin-upload-message','Ошибка загрузки: '+error.message);}
-    finally{button.disabled=false;}
+    }catch(error){
+      progressState('error','Загрузка не завершена. Исправьте ошибку и повторите.');
+      status('#admin-upload-message','Ошибка загрузки: '+error.message);
+    }finally{lockUpload(false);}
+  }
+  fileInput.addEventListener('change',()=>{
+    const file=fileInput.files?.[0];
+    selectedFile(file);
+    if(!file)return;
+    status('#admin-upload-message','Выбран файл '+file.name+'. Начинаем загрузку…',true);
+    void submitUpload();
+  });
+  uploadRes.addEventListener('change',()=>selectedFile(fileInput.files?.[0]));
+  uploadRole.addEventListener('change',()=>selectedFile(fileInput.files?.[0]));
+  $('#admin-upload-form').addEventListener('submit',event=>{
+    event.preventDefault();
+    void submitUpload();
   });
   const timer=setInterval(()=>{if(allowed()&&(!panel.hidden||!healthPanel.hidden)&&$('#settings-dialog').open&&navigator.onLine&&document.visibilityState==='visible')void refresh({silent:true});},10000);timer?.unref?.();
   renderUploadCurrent();

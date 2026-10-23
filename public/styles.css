@@ -822,3 +822,28 @@ dialog.has-swipe-underlay::backdrop{background:#0e253868;backdrop-filter:blur(3p
   .header-actions{--header-control-size:42px;gap:6px}
   .header-actions .header-res-button #res-label{font-size:14px}
 }
+
+/* Immediate admin Excel upload: selected file, network progress, server parsing status. */
+#admin-upload-form .admin-upload-selected{
+  display:flex;align-items:center;gap:12px;min-width:0;padding:13px 15px;
+  border:1px solid #cddff0;background:#f3f8fe;border-radius:11px;
+}
+#admin-upload-selected>svg{width:23px;height:23px;flex:none;color:#42719e}
+#admin-upload-selected>div{display:grid;gap:3px;min-width:0}
+#admin-upload-selected-name{font-size:13px;color:#1d456e;overflow-wrap:anywhere}
+#admin-upload-selected-info{font-size:11px;color:#647e98;overflow-wrap:anywhere}
+#admin-upload-progress{
+  display:grid;gap:9px;padding:13px 15px;border:1px solid #d0e0ee;
+  background:#f7faff;border-radius:11px;
+}
+#admin-upload-progress[data-stage="done"]{background:#f1faf5;border-color:#bbddc9}
+#admin-upload-progress[data-stage="error"]{background:#fff5f3;border-color:#eecac8}
+.admin-upload-progress-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;line-height:1.45}
+#admin-upload-progress-label{font-size:12px;color:#365a7a;overflow-wrap:anywhere}
+#admin-upload-progress[data-stage="done"] #admin-upload-progress-label{color:#287251}
+#admin-upload-progress[data-stage="error"] #admin-upload-progress-label{color:#ab4c4c}
+#admin-upload-progress-pct{font-size:12px;font-weight:750;color:#365a7a;white-space:nowrap}
+#admin-upload-progress-bar{width:100%;height:12px;accent-color:#2864de}
+#admin-upload-progress[data-stage="done"] #admin-upload-progress-bar{accent-color:#32865e}
+#admin-upload-progress[data-stage="error"] #admin-upload-progress-bar{accent-color:#d77b74}
+#admin-upload-submit:disabled{opacity:.68;cursor:progress}
