@@ -97,7 +97,7 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     // coordinate, instead of an unhelpful generic HTTP 500 message.
     const badNumber=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(badNumber,XLSX.utils.aoa_to_sheet([
-      ['ЛС','Номер счетчика'],['000001',1234567890123456],
+      ['ЛС','Номер счетчика'],['000001',10000000000000000],
     ]),'Реестр');
     const registryUploadRoute='/api/admin/upload?resPath='+encodeURIComponent(SOCHI_RES_PATHS[0])+'&role=registry&filename='+encodeURIComponent('Расширенный список.xlsx');
     const rejected=await api(registryUploadRoute,{method:'POST',
@@ -122,6 +122,27 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     assert.ok(savedWithWarning.warnings?.some(note=>/Столбец C.*Заводской номер ТТ/.test(note)));
     const currentAdmin=await (await api('/api/admin/database',{headers:{Cookie:adminCookie}})).json();
     assert.ok(currentAdmin.folders.find(f=>f.res_path===SOCHI_RES_PATHS[0]).statuses.registry.warnings.some(note=>/Столбец C/.test(note)));
+
+    // This 16-digit numeric factory number is confirmed correct by the
+    // operator and fits into Number.MAX_SAFE_INTEGER. Keep every digit for
+    // the indexed meter search and warn about the XLSX export format.
+    const confirmed=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(confirmed,XLSX.utils.aoa_to_sheet([
+      ['ЛС','Номер счетчика'],
+      ['230703231250',6003481006073610],
+    ]),'Реестр');
+    const acceptedMeter=await api(registryUploadRoute,{method:'POST',
+      headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
+      body:XLSX.write(confirmed,{type:'buffer',bookType:'xlsx'})});
+    const acceptedMeterResult=await acceptedMeter.json();
+    assert.equal(acceptedMeter.status,200,JSON.stringify(acceptedMeterResult));
+    assert.ok(acceptedMeterResult.warnings?.some(note=>/Столбец B.*Номер счетчика/.test(note)));
+    const verifiedSearch=await json('/api/registry',{resPath:SOCHI_RES_PATHS[0],
+      action:'search',payload:{field:'meter',query:'6003481006073610'}},userCookie);
+    assert.equal(verifiedSearch.status,200);
+    assert.equal((await verifiedSearch.json()).result.total,1);
+    const verifiedStatus=await (await api('/api/admin/database',{headers:{Cookie:adminCookie}})).json();
+    assert.ok(verifiedStatus.folders.find(f=>f.res_path===SOCHI_RES_PATHS[0]).statuses.registry.warnings.some(note=>/Столбец B/.test(note)));
 
 
     // Amvera-style ingress rejects large single bodies: the new API must

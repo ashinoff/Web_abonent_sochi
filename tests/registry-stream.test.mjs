@@ -74,7 +74,7 @@ test('one header per worksheet, skipped sheets and empty registry sheets match t
 
 test('numeric identifiers damaged by Excel fail before saving a usable package and clean up strings', async t => {
   for (const z of ['General', '0000000000000000']) {
-    const f = await fixture(t, { Реестр: [simpleHeader, [1234567890123456, '0001']] }, { mutate: book => { book.Sheets.Реестр.A2.z = z; } });
+    const f = await fixture(t, { Реестр: [simpleHeader, [10000000000000000, '0001']] }, { mutate: book => { book.Sheets.Реестр.A2.z = z; } });
     await assert.rejects(writeRegistryXLSX(f.path, f.output), /Строка 2:.*Excel мог округлить/);
     assert.throws(() => prepareWorkbook(f.bytes, 'registry'), /Строка 2:.*Excel мог округлить/);
     assert.ok(!(await readdir(f.dir)).some(name => name.startsWith('xlsx-strings-')));
@@ -110,7 +110,7 @@ test('preparation process detects XLSX by signature and keeps the old XLS parser
 // The Sochi "Расширенный список" has a merged three-level 1C header.
 // A bad TT serial at row 9895 must not invalidate the registry; a bad
 // meter/LS/point identifier must never be silently rounded into a search key.
-function sochiHeaderRows({brokenMeter=false}={}) {
+function sochiHeaderRows({brokenMeter=false,confirmedMeter=false}={}) {
   const top=Array(69).fill(''),middle=Array(69).fill(''),bottom=Array(69).fill('');
   for(const [col,value] of [[0,'№ п/п'],[1,'ТУ'],[2,'Номер ТУСТЕК'],
     [3,'Номер ТУ'],[4,'ЛС / ЛС СТЕК'],[5,'Наименование договора'],
@@ -128,14 +128,14 @@ function sochiHeaderRows({brokenMeter=false}={}) {
   const damaged=Array(69).fill('');
   Object.assign(damaged,{0:9892,2:'00000102345',3:'2',4:'00000001001',
     5:'Тестовый абонент',14:'Сочи',15:'Тестовая',16:'12',
-    21:'ТП-100',24:brokenMeter?1234567890123456:'000000001234568',
+    21:'ТП-100',24:brokenMeter?10000000000000000:confirmedMeter?6003481006073610:'000000001234568',
     40:1234567890123456});
   const rows=[top,middle,bottom,first];
   rows[9894]=damaged;
   return rows;
 }
-function sochiFixture(t,{brokenMeter=false}={}){
-  return fixture(t,{Реестр:sochiHeaderRows({brokenMeter})},{
+function sochiFixture(t,{brokenMeter=false,confirmedMeter=false}={}){
+  return fixture(t,{Реестр:sochiHeaderRows({brokenMeter,confirmedMeter})},{
     mutate(book){
       book.Sheets.Реестр['!merges']=[
         'A1:A3','B1:B3','C1:C3','D1:D3','E1:E3','F1:F3',
@@ -166,4 +166,16 @@ test('Sochi three-level header: damaged critical meter at row 9895 reports exact
     /Строка 9895: ячейка Y9895.*Номер счетчика.*Excel мог округлить/);
   assert.throws(()=>prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx'),
     /Строка 9895: ячейка Y9895.*Номер счетчика.*Excel мог округлить/);
+});
+
+test('Sochi 1C three-level header imports verified numeric meter 6003481006073610 at Y9895',async t=>{
+  const f=await sochiFixture(t,{confirmedMeter:true});
+  const warnings=await writeRegistryXLSX(f.path,f.output,'Расширенный список.xlsx');
+  const pack=JSON.parse(await readFile(f.output,'utf8'));
+  assert.equal(pack.sheets[0].rows[1][0],9895);
+  assert.equal(pack.sheets[0].rows[1][1][24],'6003481006073610');
+  assert.ok(warnings.some(message=>/Столбец Y.*Номер счетчика.*9895/.test(message)));
+  const index=buildIndex(unpackRegistry(pack));
+  assert.equal(search(index,{query:'6003481006073610',field:'meter'}).total,1);
+  assert.deepEqual(pack,prepareWorkbook(f.bytes,'registry','Расширенный список.xlsx'));
 });

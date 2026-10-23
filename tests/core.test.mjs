@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from '@e965/xlsx';
-import { parseMatrix, buildIndex, search, detectLayout, restoreNumericIdentifiers, listTPs, metersByTP, analysisRecords } from '../public/core.js';
+import { parseMatrix, buildIndex, search, detectLayout, restoreNumericIdentifiers, identifierWarnings, unsafeNumericIdentifier, longNumericIdentifier, listTPs, metersByTP, analysisRecords } from '../public/core.js';
 import { demo } from '../public/demo.js';
 test('analysis registry transfer retains report address and provenance while excluding phones, notes and unrelated fields',()=>{
   const source=parseMatrix([['ЛС','Номер ПУ','ТУ','Адрес','Телефон','Примечание','Стороннее поле'],['001','0002','Точка','Город Тестовый, улица Учебная, 1','12345','Длинное примечание','Лишнее значение']],{file:'Тестовый реестр.xlsx',sheet:'Учебный лист'});
@@ -76,9 +76,23 @@ test('real XLSX decoding preserves padded and long numeric identifiers', () => {
   assert.equal(r.fields.account, '123456789012'); assert.equal(r.fields.meter, '00012345');
 });
 test('reject rounded numeric IDs instead of fabricating original values', () => {
-  const ws = XLSX.utils.aoa_to_sheet([['ЛС','Номер счетчика'], [1234567890123456, 'ABC']]);
+  const ws = XLSX.utils.aoa_to_sheet([['ЛС','Номер счетчика'], [10000000000000000, 'ABC']]);
   const matrix = XLSX.utils.sheet_to_json(ws, {header:1,raw:false});
   assert.throws(() => restoreNumericIdentifiers(matrix, ws, detectLayout(matrix)), /Excel мог округлить/);
+});
+test('confirmed 6003481006073610 stays intact even when the XLSX cell is numeric', () => {
+  const number=6003481006073610;
+  assert.equal(Number.isSafeInteger(number),true);
+  assert.equal(unsafeNumericIdentifier({t:'n',v:number}),false);
+  assert.equal(longNumericIdentifier({t:'n',v:number}),true);
+  const ws=XLSX.utils.aoa_to_sheet([['ЛС','Номер счетчика'],['230703231250',number]]);
+  const matrix=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+  const warnings=identifierWarnings();
+  restoreNumericIdentifiers(matrix,ws,detectLayout(matrix),warnings);
+  const index=buildIndex([parseMatrix(matrix)]);
+  assert.equal(index.records[0].fields.meter,'6003481006073610');
+  assert.equal(search(index,{query:'6003481006073610'}).total,1);
+  assert.match(warnings.list().join(' '),/Столбец B.*Номер счетчика.*Excel мог округлить/);
 });
 test('schema correction, empty rows, repeated headers, and zero are handled', () => {
   const rows = [['ЛС','Номер ПУ','Заметка'], ['a','b','0'], [], ['ЛС','Номер ПУ','Заметка'], ['c','d',0]];
