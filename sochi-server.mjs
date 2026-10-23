@@ -189,7 +189,7 @@ export function createSochiServer(options={}) {
         let database={state:'connected',issue:null},folders=[];
         try {await store.ready?.();folders=await store.listFolders(SOCHI_SOURCE);}
         catch {database={state:'error',issue:'unavailable'};}
-        sendJson(res,200,{source:{state:'configured',issue:null},database,catalog:{state:folders.length?'ready':'empty',resCount:folders.length,enterpriseCount:1},
+        sendJson(res,200,{sochi:true,source:{state:'configured',issue:null},database,catalog:{state:folders.length?'ready':'empty',resCount:folders.length,enterpriseCount:1},
           sync:{state:'ready',issue:null},memory:await preparationMemory(),snapshotStorage:store.snapshotStorage||'json'});return;
       }
       if(url.pathname==='/api/load-map') {

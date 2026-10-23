@@ -24,7 +24,9 @@ test('Sochi admin sees seven RES scopes, manages staff visibility and uploads XL
   let changeCount=0;
   const folder=res_path=>({
     res_path,load_blocked:false,local_blocked:false,enterprise_name:'Сочинское предприятие электрических сетей',
-    res_name:res_path.split('/').at(-1),statuses:res_path===SOCHI_RES_PATHS[1]?{events:{state:'ready',file:'События.xlsx'}}:{}
+    res_name:res_path.split('/').at(-1),statuses:res_path===SOCHI_RES_PATHS[1]
+      ?{events:{state:'ready',file:'События.xlsx',path:res_path+'/46. События по точкам учёта.xlsx'},
+        registry:{state:'error',message:'Неверные столбцы реестра'}}:{}
   });
   const fetcher=async(input,options={})=>{
     const url=new URL(input);
@@ -33,7 +35,10 @@ test('Sochi admin sees seven RES scopes, manages staff visibility and uploads XL
     if(path==='/api/admin/accounts'&&method==='GET')return Response.json({accounts:[admin,...users]});
     if(path==='/api/admin/database'&&method==='GET')return Response.json({
       overview:{database_bytes:512,snapshot_count:1,payload_bytes:512,account_count:users.length+1},
-      folders:SOCHI_RES_PATHS.map(folder),events:[],globalBlocked:false
+      folders:SOCHI_RES_PATHS.map(folder),events:[{
+        category:'upload',code:'upload_failed',message:'Файл ПО отклонён: неверная шапка',
+        res_path:SOCHI_RES_PATHS[1],actor:'admin',created_at:'2026-10-23T11:00:00Z'
+      }],globalBlocked:false
     });
     if(path==='/api/admin/accounts'&&method==='POST'){
       const body=JSON.parse(options.body);
@@ -54,6 +59,12 @@ test('Sochi admin sees seven RES scopes, manages staff visibility and uploads XL
   assert.equal($('#admin-res-checkboxes').querySelectorAll('[data-res-scope]').length,7);
   assert.equal($('#admin-upload-res').options.length,7);
   assert.equal($('#admin-upload-role').options.length,5);
+  assert.equal($('#admin-template-list').querySelectorAll('a[href*="/api/admin/template?role="]').length,5,
+    'each source type needs a downloadable XLSX template');
+  assert.match($('#admin-db-analysis').textContent,/Готовых источников/);
+  assert.match($('#admin-db-problems').textContent,/Неверные столбцы реестра/);
+  assert.match($('#admin-db-problems').textContent,/Файл ПО отклонён/);
+  assert.match($('#admin-problem-count').textContent,/ошибок/);
   assert.equal(page.document.querySelector('[data-open-enterprises]'),null);
 
   $('#admin-add-account').click();
@@ -82,6 +93,8 @@ test('Sochi admin sees seven RES scopes, manages staff visibility and uploads XL
 
   $('#admin-upload-res').value=SOCHI_RES_PATHS[1];
   $('#admin-upload-role').value='events';
+  $('#admin-upload-role').dispatchEvent(new page.Event('change'));
+  assert.equal(new URL($('#admin-template-current').href).searchParams.get('role'),'events');
   $('#admin-upload-res').dispatchEvent(new page.Event('change'));
   assert.match($('#admin-upload-current').textContent,/События.xlsx/);
   Object.defineProperty($('#admin-upload-file'),'files',{configurable:true,value:[{name:'Новый журнал.xlsx',size:1000}]});

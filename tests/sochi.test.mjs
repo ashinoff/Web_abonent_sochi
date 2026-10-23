@@ -53,6 +53,19 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     const userLogin=await json('/api/auth/login',{login:'sochi-res-scope-test',password:'long-res-scope-password'});
     assert.equal(userLogin.status,200);
     const userCookie=userLogin.headers.get('set-cookie').split(';')[0];
+    const templateUrl='/api/admin/template?role=events';
+    assert.equal((await api(templateUrl)).status,401,'templates require authentication');
+    assert.equal((await api(templateUrl,{headers:{Cookie:userCookie}})).status,403,
+      'employees must not download admin templates');
+    const template=await api(templateUrl,{headers:{Cookie:adminCookie}});
+    assert.equal(template.status,200);
+    assert.match(template.headers.get('content-type'),/spreadsheetml/);
+    assert.match(template.headers.get('content-disposition'),/attachment/);
+    const templateBytes=Buffer.from(await template.arrayBuffer());
+    assert.equal(templateBytes[0],0x50);
+    assert.deepEqual(XLSX.utils.sheet_to_json(XLSX.read(templateBytes,{type:'buffer'}).Sheets['46. События по точкам учёта'.slice(0,31)],{header:1})[0],
+      ['Серийный','Дата и время','Дополнительная информация']);
+    assert.equal((await api('/api/admin/template?role=unknown',{headers:{Cookie:adminCookie}})).status,400);
     const list=await api('/api/load-map',{headers:{Cookie:userCookie}});
     const limited=await list.json();
     assert.equal(limited.folders.length,1);
@@ -71,6 +84,13 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
       'employee must not upload even a valid workbook');
     const uploaded=await api(uploadUrl,{method:'POST',headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:bytes});
     assert.equal(uploaded.status,200,await uploaded.text().catch(()=>'')); 
+    const invalidImport=await api(uploadUrl,{method:'POST',
+      headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
+      body:Buffer.from('not an xlsx workbook')});
+    assert.ok(invalidImport.status>=400,'invalid XLSX must be rejected');
+    const errorsView=await (await api('/api/admin/database',{headers:{Cookie:adminCookie}})).json();
+    assert.ok(errorsView.events.some(event=>event.code==='upload_failed'&&event.res_path===SOCHI_RES_PATHS[0]),
+      'failed imports should be visible in admin database analysis');
     const filePath=canonicalSochiPath(SOCHI_RES_PATHS[0],'incoming');
     const prepared=await api('/api/prepared?path='+encodeURIComponent(filePath)+'&role=incoming',{headers:{Cookie:userCookie}});
     assert.equal(prepared.status,200);

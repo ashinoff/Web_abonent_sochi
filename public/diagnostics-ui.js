@@ -38,7 +38,9 @@ function registryCards(context) {
 export function diagnosticsHTML(data, context, kind) {
   const items = [];
   const source = data.source || {}, db = data.database || {}, catalog = data.catalog || {}, sync = data.sync || {};
-  if (source.state === 'configured') items.push(card('Источник обновления', 'ok', 'Ссылка на общую папку задана на сервере. Это подтверждает настройку ссылки, но не результат последней проверки.', ''));
+  if (source.state === 'configured') items.push(data.sochi
+    ? card('Загрузка Excel администратором', 'ok', 'В Сочи файлы загружаются с компьютера и сохраняются в PostgreSQL. Яндекс Диск не используется.', '')
+    : card('Источник обновления', 'ok', 'Ссылка на общую папку задана на сервере. Это подтверждает настройку ссылки, но не результат последней проверки.', ''));
   else {
     const [title, remedy] = sourceProblems[source.issue] || sourceProblems.not_configured;
     items.push(card(title, 'error', 'Сервер не может получить дерево предприятий и РЭС; запрос /api/resources в этом случае возвращает 503.', remedy));
@@ -50,7 +52,9 @@ export function diagnosticsHTML(data, context, kind) {
   }
   if (db.state === 'connected' && source.state === 'configured') {
     if (catalog.state === 'ready') items.push(card('Карта базы заполнена', 'ok', `Проверено РЭС: ${catalog.resCount || 0}; предприятий: ${catalog.enterpriseCount || 0}.`, ''));
-    else items.push(card('Карта базы пока пуста', 'waiting', 'Подключение к PostgreSQL есть, но сервер ещё не сохранил ни одной РЭС.', sync.state === 'error' ? (syncProblems[sync.issue] || syncProblems.unavailable) : 'Дождитесь первой фоновой проверки папок после запуска приложения. Если она долго не завершается, проверьте журнал «Обновление данных» в Amvera.'));
+    else items.push(card('Карта базы пока пуста', 'waiting', 'Подключение к PostgreSQL есть, но сервер ещё не сохранил ни одной РЭС.', data.sochi
+      ? 'Проверьте, что новая база Сочи создана и администратор загрузил исходные Excel.'
+      : sync.state === 'error' ? (syncProblems[sync.issue] || syncProblems.unavailable) : 'Дождитесь первой фоновой проверки папок после запуска приложения. Если она долго не завершается, проверьте журнал «Обновление данных» в Amvera.'));
   }
   if (sync.state === 'running') items.push(card('Обновление выполняется', 'waiting', 'Сервер проверяет файлы и готовит данные. Большая книга Excel может обрабатываться несколько минут.', 'Нажмите «Проверить снова» чуть позже.'));
   if (sync.state === 'error' && catalog.state !== 'empty') items.push(card('Обновление не завершилось', 'error', syncProblems[sync.issue] || syncProblems.unavailable, 'Последняя сохранённая версия остаётся в базе, если она была подготовлена ранее.'));

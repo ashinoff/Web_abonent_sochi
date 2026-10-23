@@ -79,6 +79,15 @@ test('Sochi browser sees one enterprise, scoped RES, server search and no automa
   assert.equal($('#district-button').disabled,true);
   assert.equal(page.document.querySelector('[data-open-enterprises]'),null,'the obsolete other enterprise button must be removed');
   assert.equal($('#admin-upload-open').hidden,true,'regular employee must not see administrator upload shortcut');
+  assert.equal($('#settings-open').hidden,true,'admin settings must be hidden from staff');
+  assert.equal($('#db-health-tab').hidden,true,'DB error analysis must be admin-only');
+  assert.equal($('#staff-logout').hidden,false,'staff keeps an explicit sign-out action');
+  assert.equal($('#load-map-settings').parentElement.id,'staff-offline-map-slot','employee offline management must not live in settings');
+  $('#offline-open').click();
+  await until(()=>callPaths.includes('/api/load-map'),'staff offline map loads scoped RES');
+  assert.equal($('#settings-dialog').open,false,'employee offline workflow does not open admin settings');
+  assert.equal($('#staff-offline-map-slot').hidden,false);
+  $('#offline-dialog').close();
   assert.equal($('#district-label').textContent,'Сочинское предприятие электрических сетей');
   assert.equal($('#res-list').querySelectorAll('[data-res]').length,1);
   $('#res-button').click();
