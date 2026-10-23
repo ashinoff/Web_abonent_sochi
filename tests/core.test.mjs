@@ -109,7 +109,7 @@ test('confirmed 6003481006073610 stays intact even when the XLSX cell is numeric
   const index=buildIndex([parseMatrix(matrix)]);
   assert.equal(index.records[0].fields.meter,'6003481006073610');
   assert.equal(search(index,{query:'6003481006073610'}).total,1);
-  assert.match(warnings.list().join(' '),/Столбец B.*Номер счетчика.*Excel мог округлить/);
+  assert.match(warnings.list().join(' '),/Столбец B.*Номер счетчика.*Excel.*округлены/);
 });
 test('schema correction, empty rows, repeated headers, and zero are handled', () => {
   const rows = [['ЛС','Номер ПУ','Заметка'], ['a','b','0'], [], ['ЛС','Номер ПУ','Заметка'], ['c','d',0]];
