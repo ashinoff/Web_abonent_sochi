@@ -121,13 +121,27 @@ export function createSochiServer(options={}) {
         uploadQueue=new Promise(resolve=>{release=resolve;});
         try {
           await prior;
-          const received=await receiveSochiWorkbook(req,{role,filename});
-          const status=await store.saveSochiUpload(SOCHI_SOURCE,{
-            resPath,role,path,filename,size:received.size,revision:received.revision,json:received.json,actor:actor.login,
-          });
-          registry.invalidate(resPath);
-          analytics.invalidate(resPath);
-          sendJson(res,200,{ok:true,role,resPath,status});
+          try {
+            const received=await receiveSochiWorkbook(req,{role,filename});
+            const status=await store.saveSochiUpload(SOCHI_SOURCE,{
+              resPath,role,path,filename,size:received.size,revision:received.revision,json:received.json,actor:actor.login,
+            });
+            registry.invalidate(resPath);
+            analytics.invalidate(resPath);
+            sendJson(res,200,{ok:true,role,resPath,status});
+          } catch(error) {
+            // Record failed imports in "Анализ базы" without storing Excel
+            // contents. Never replace a working snapshot on parser failure.
+            try {
+              await store.appendAdminEvent(SOCHI_SOURCE,{
+                category:'upload',code:'upload_failed',resPath,actor:actor.login,
+                message:'Не удалось загрузить '+role+': '+String(error.message||'Ошибка обработки Excel').slice(0,320),
+              });
+            } catch(logError) {
+              console.warn('Sochi upload audit log unavailable:',logError.message);
+            }
+            throw error;
+          }
         } finally {release();}
         return;
       }

@@ -156,7 +156,31 @@ function openDialog(id) {
   const dialog = $('#' + id);
   if (!dialog.open) dialog.showModal();
 }
-function showSettings() { renderIndicators(); analysisUI.settingsTab('connection'); openDialog('settings-dialog'); }
+function showSettings() {
+  if (config.sochi && !accountUI?.isAdmin) {
+    // Staff need offline copies, not the administrator's settings console.
+    void showOfflineCopies();return;
+  }
+  renderIndicators();analysisUI.settingsTab('connection');openDialog('settings-dialog');
+}
+function arrangeSochiAccess({enabled,user}){
+  if(!config.sochi||!enabled)return;
+  const admin=['admin','superadmin'].includes(user?.role);
+  const panel=$('#load-map-settings'),home=$('#admin-load-map-home'),offline=$('#staff-offline-map-slot');
+  if(admin){
+    if(panel.previousElementSibling!==home)home.after(panel);
+    panel.hidden=$('#load-map-tab').getAttribute('aria-selected')!=='true';
+    offline.hidden=true;
+    $('#load-map-tab').hidden=false;
+  }else{
+    // Move the existing load-map UI instead of duplicating IDs or offline
+    // storage logic. Employees can download their permitted RES without
+    // ever opening the admin-only settings dialog.
+    if(panel.parentElement!==offline)offline.append(panel);
+    panel.hidden=false;offline.hidden=false;$('#load-map-tab').hidden=true;
+    if($('#settings-dialog').open)$('#settings-dialog').close();
+  }
+}
 function showEnterprises() {
   if(config.sochi){showRes();return;}
   openDialog('enterprise-dialog'); renderFolders();
@@ -189,6 +213,7 @@ async function refreshOfflineAvailability() {
 async function showOfflineCopies() {
   const version = ++offlineListVersion, source = offlineRoot();
   openDialog('offline-dialog');
+  if(config.sochi && accountUI?.enabled && !accountUI.isAdmin)void loadMap.refresh();
   const list = $('#offline-list');
   offlineChoices = []; offlineSource = source;
   list.setAttribute('aria-busy', 'true');
@@ -1180,7 +1205,7 @@ const diagnosticsUI = initDiagnosticsUI({ openDialog, showSettings, context: () 
   sourceState, registryState, registryError, filesState, filesError, selectedRes: selectedRes?.name,
   selectedFile: selectedFile?.name, pending: Boolean(pending), offline: !navigator.onLine, serverMode: proxy,
 }) });
-accountUI=initAccountUI({canRefresh:()=>!usingOfflineCopy,onChange:({enabled,user})=>{if(enabled&&!user){if(busy)stopLoading();loads.start();clearDataset();adminUI.reset();}renderIndicators();},onLogout:()=>{adminUI.reset();clearDataset();}});
+accountUI=initAccountUI({canRefresh:()=>!usingOfflineCopy,onChange:({enabled,user})=>{arrangeSochiAccess({enabled,user});if(enabled&&!user){if(busy)stopLoading();loads.start();clearDataset();adminUI.reset();}renderIndicators();},onLogout:()=>{adminUI.reset();clearDataset();}});
 const adminUI=initAdminUI({account:()=>accountUI.user,onDatabaseChanged:()=>{if(busy)stopLoading();void loadMap.refresh();directoryState='idle';folderRead=null;}});
 async function sochiAnalysisRequest(action,payload={},transfer=[],onProgress=()=>{}){
   if(config.sochi&&!usingOfflineCopy&&action==='exportAnomalies'){
@@ -1246,6 +1271,7 @@ function applyReading(box) {
 }
 document.addEventListener('click',e=>{const button=e.target.closest('[data-reading-action]');if(button)applyReading(button.closest('.reading-calculator'));});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.closest('.reading-calculator')){e.preventDefault();applyReading(e.target.closest('.reading-calculator'));}});
+$('#staff-logout').addEventListener('click',()=>$('#account-logout').click());
 $('#settings-open').addEventListener('click', showSettings); $('#district-button').addEventListener('click', showEnterprises); $('#res-button').addEventListener('click', showRes);
 $('#admin-upload-open').addEventListener('click',()=>{
   if(!config.sochi||!['admin','superadmin'].includes(accountUI?.user?.role))return;

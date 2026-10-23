@@ -115,7 +115,7 @@ export function initAnalysisUI({ request, isReady, getIncoming, showConnection, 
     for(const tab of document.querySelectorAll('[data-settings-tab]'))document.getElementById(tab.getAttribute('aria-controls')).hidden=tab.dataset.settingsTab!==name;
     $('#settings-dialog .dialog-body').scrollTop=0;
     if (name === 'load-map') onMapOpen?.();
-    if (name === 'admin') onAdminOpen?.();
+    if (name === 'admin' || name === 'db-health') onAdminOpen?.();
   }
   document.querySelectorAll('[data-settings-tab]').forEach(b => {
     b.addEventListener('click', () => settingsTab(b.dataset.settingsTab));

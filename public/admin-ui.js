@@ -5,8 +5,17 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 const roleName={user:'Пользователь',admin:'Администратор',superadmin:'Суперадминистратор'};
 const dates=value=>value?new Date(value).toLocaleString('ru-RU'):'—';
 const scopeLabel=user=>user.role==='user'?(user.resPaths||[]).map(path=>SOCHI_RES_NAMES[SOCHI_RES_PATHS.indexOf(path)]||path).join(', ')||'не назначены':'все 7 РЭС';
+// The incoming book is stored for future balance calculations. Other books already
+// contribute to search, consumption analysis or electrical journal flags.
+const templateDescriptions={
+  registry:'Номера ПУ, лицевые счета, адреса и принадлежность к ТП.',
+  consumption:'Помесячные кВт·ч, номера ЛС и точек учёта.',
+  incoming:'Показания и приём. Балансовый расчёт пока не подключён.',
+  instant:'Журнал 31: токи, напряжения, мощности и cos φ.',
+  events:'Журнал 46: даты и описания событий по ПУ.',
+};
 export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=>fetch(...args)}){
-  const $=selector=>document.querySelector(selector),panel=$('#admin-settings');
+  const $=selector=>document.querySelector(selector),panel=$('#admin-settings'),healthPanel=$('#db-health-settings');
   let accounts=[],database=null,editing=null,loading=false,version=0;
   const resChecks=$('#admin-res-checkboxes'),resBlock=$('#admin-user-res-scopes');
   if(resChecks)resChecks.innerHTML=SOCHI_RES_PATHS.map((path,i)=>
@@ -16,6 +25,9 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
     `<option value="${esc(path)}">${esc(SOCHI_RES_NAMES[i])}</option>`).join('');
   if(uploadRole)uploadRole.innerHTML=Object.entries(SOCHI_ROLES).map(([role,name])=>
     `<option value="${role}">${esc(name)}</option>`).join('');
+  const templateList=$('#admin-template-list');
+  if(templateList)templateList.innerHTML=Object.entries(SOCHI_ROLES).map(([role,name])=>
+    `<article class="admin-template-item"><div><strong>${esc(name)}</strong><p>${esc(templateDescriptions[role])}</p></div><a href="./api/admin/template?role=${role}" download class="secondary" aria-label="Скачать XLSX шаблон ${esc(name)}"><svg aria-hidden="true"><use href="#i-file"/></svg>Скачать</a></article>`).join('');
   const updateScopes=()=>{if(resBlock)resBlock.hidden=$('#admin-user-role').value!=='user';};
   // A user's scope is an explicit list of RES; admin and superadmin see all seven.
   for(const [id,checked] of [['#admin-scope-all',true],['#admin-scope-none',false]]){
@@ -45,6 +57,37 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
     if(!database)return;const value=database.overview;
     $('#admin-db-summary').innerHTML=`<div class="admin-metrics"><div><span>База подключена</span><strong>${esc(formatBytes(Number(value.database_bytes)))}</strong></div><div><span>Пакетов в базе</span><strong>${esc(value.snapshot_count)}</strong></div><div><span>Объём пакетов</span><strong>${esc(formatBytes(Number(value.payload_bytes)))}</strong></div><div><span>Учётных записей</span><strong>${esc(value.account_count)}</strong></div></div><p class="hint">${database.globalBlocked?'Вся загрузка приостановлена.':'Загрузка разрешена для открытых РЭС.'} ${database.catalogRunning||database.preparation?.syncing?'Проверяем карту папок…':''}</p>`;
     $('#admin-global-policy').textContent=database.globalBlocked?'Разрешить общую загрузку':'Приостановить всю загрузку';
+    // Compare all 35 possible sources in PostgreSQL, not only the files that
+    // were uploaded. Missing optional journals are not database failures.
+    const allFolders=SOCHI_RES_PATHS.map((resPath,i)=>database.folders?.find(f=>f.res_path===resPath)||{
+      res_path:resPath,res_name:SOCHI_RES_NAMES[i],statuses:{}
+    });
+    const slots=allFolders.flatMap(folder=>Object.keys(SOCHI_ROLES).map(role=>({
+      folder,role,item:folder.statuses?.[role]||null
+    })));
+    const ready=slots.filter(({item})=>item?.state==='ready'&&item.path).length;
+    const failures=slots.filter(({item})=>['error','stale'].includes(item?.state));
+    const required=slots.filter(({role,item})=>['registry','consumption'].includes(role)&&!(item?.state==='ready'&&item.path)&&!['error','stale'].includes(item?.state));
+    const uploadFailures=(database.events||[]).filter(item=>item.code==='upload_failed').slice(0,12);
+    const missing=slots.length-ready-failures.length;
+    const metric=(label,count,note)=>`<div class="admin-health-card"><span>${esc(label)}</span><strong>${esc(count)}</strong><small>${esc(note)}</small></div>`;
+    $('#admin-db-analysis').innerHTML=[
+      metric('Готовых источников',ready,'Из 35 позиций в 7 РЭС'),
+      metric('Ещё не загружено',missing,'Включая необязательные журналы'),
+      metric('Ошибки подготовки',failures.length,'Ошибка или устаревшая версия'),
+    ].join('');
+    const problem=(level,title,detail,badge)=>`<article class="admin-db-problem" data-level="${level}"><div><strong>${esc(title)}</strong><p>${esc(detail)}</p></div><span class="admin-problem-label">${esc(badge)}</span></article>`;
+    const problems=[
+      ...failures.map(({folder,role,item})=>problem('error',folder.res_name+' · '+SOCHI_ROLES[role],item.message||'Ошибка или устаревшая версия источника. Проверьте загруженную книгу.','ОШИБКА')),
+      ...uploadFailures.map(event=>problem('error','Не удалось загрузить Excel'+(event.res_path&&event.res_path!=='/'?' · '+event.res_path.split('/').at(-1):''),event.message||'Ошибка загрузки',dates(event.created_at))),
+      ...required.map(({folder,role})=>problem('warn',folder.res_name+' · '+SOCHI_ROLES[role],
+        'Обязательный для основного поиска или анализа файл ещё не загружен.','НЕТ ФАЙЛА')),
+    ];
+    if(database.globalBlocked)problems.unshift(problem('warn','Загрузка всех РЭС приостановлена','Разрешите запись после завершения обслуживания базы.','ПАУЗА'));
+    $('#admin-problem-count').textContent=failures.length+uploadFailures.length+' ошибок · '+required.length+' обязательных файлов отсутствует';
+    $('#admin-db-problems').innerHTML=problems.join('')||'<div class="admin-db-empty">Ошибок подготовки и пропущенных обязательных файлов не обнаружено.</div>';
+    status('#admin-health-message','');
+
     const query=$('#admin-res-search').value.trim().toLowerCase(),groups=new Map();
     for(const folder of database.folders){if(query&&![folder.res_name,folder.enterprise_name].some(value=>value.toLowerCase().includes(query)))continue;if(!groups.has(folder.enterprise_name))groups.set(folder.enterprise_name,[]);groups.get(folder.enterprise_name).push(folder);}
     const open=new Set([...$('#admin-res-list').querySelectorAll('details[open]')].map(node=>node.dataset.enterprise));
@@ -62,6 +105,8 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
     if(!SOCHI_RES_PATHS.includes(resPath)||!Object.hasOwn(SOCHI_ROLES,role)){
       node.textContent='Выберите РЭС и тип файла.';return;
     }
+    const template=$('#admin-template-current');
+    if(template&&Object.hasOwn(SOCHI_ROLES,role))template.href=new URL('./api/admin/template?role='+encodeURIComponent(role),location.href).href;
     if(!database){node.textContent='Проверяем текущий файл в базе…';return;}
     const folder=database.folders?.find(item=>item.res_path===resPath);
     if(folder?.load_blocked||folder?.local_blocked){
@@ -75,12 +120,13 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
   uploadRes?.addEventListener('change',renderUploadCurrent);
   uploadRole?.addEventListener('change',renderUploadCurrent);
   async function refresh({silent=false}={}){
-    if(loading||!allowed()||(silent&&panel.hidden))return;loading=true;const run=++version;if(!silent)status('#admin-message','Проверяем базу и учётные записи…',true);
+    if(loading||!allowed()||(silent&&panel.hidden&&healthPanel.hidden))return;loading=true;const run=++version;if(!silent)status('#admin-message','Проверяем базу и учётные записи…',true);
     try{const result=await Promise.all([api('accounts'),api('database')]);if(run!==version)return;accounts=result[0].accounts;database=result[1];renderAccounts();renderDatabase();status('#admin-message','');}
-    catch(error){status('#admin-message',error.message);}finally{loading=false;}
+    catch(error){status('#admin-message',error.message);status('#admin-health-message','Ошибка анализа базы: '+error.message);}finally{loading=false;}
   }
   async function action(button,work){if(button.disabled)return;button.disabled=true;try{await work();await refresh();}catch(error){status('#admin-message',error.message);}finally{button.disabled=false;}}
   $('#admin-refresh').addEventListener('click',()=>{void refresh();});
+  $('#admin-health-refresh')?.addEventListener('click',()=>{void refresh();});
   $('#admin-add-account').addEventListener('click',()=>form());$('#admin-account-cancel').addEventListener('click',()=>{$('#admin-account-form').hidden=true;editing=null;$('#admin-user-password').value='';});
   $('#admin-account-list').addEventListener('click',event=>{
     const edit=event.target.closest('[data-account-edit]');if(edit){form(accounts[Number(edit.dataset.accountEdit)]);return;}
@@ -131,7 +177,7 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
     }catch(error){status('#admin-upload-message','Ошибка загрузки: '+error.message);}
     finally{button.disabled=false;}
   });
-  const timer=setInterval(()=>{if(allowed()&&!panel.hidden&&$('#settings-dialog').open&&navigator.onLine&&document.visibilityState==='visible')void refresh({silent:true});},10000);timer?.unref?.();
+  const timer=setInterval(()=>{if(allowed()&&(!panel.hidden||!healthPanel.hidden)&&$('#settings-dialog').open&&navigator.onLine&&document.visibilityState==='visible')void refresh({silent:true});},10000);timer?.unref?.();
   renderUploadCurrent();
   window.addEventListener('pagehide',()=>clearInterval(timer));return{refresh,reset(){version++;accounts=[];database=null;editing=null;$('#admin-account-form').hidden=true;$('#admin-user-password').value='';}};
 }

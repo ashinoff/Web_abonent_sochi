@@ -7,8 +7,14 @@ export function initAccountUI({onLogout=()=>{},onChange=()=>{},canRefresh=()=>tr
   function render(){
     $('#account-section').hidden=!enabled;$('#account-name').textContent=user?.name||'Вход не выполнен';
     $('#account-description').textContent=user?[user.login,roleName[user.role],offline?'Работа без связи':''].filter(Boolean).join(' · '):'Войдите в свою учётную запись.';
-    $('#admin-tab').hidden=!enabled||!['admin','superadmin'].includes(user?.role);
-    $('#admin-upload-open').hidden=$('#admin-tab').hidden;
+    const admin=enabled&&['admin','superadmin'].includes(user?.role);
+    $('#admin-tab').hidden=!admin;
+    $('#db-health-tab').hidden=!admin;
+    $('#admin-upload-open').hidden=!admin;
+    // In Sochi the full settings console is admin-only. Staff can still use
+    // their own offline RES management and a separate logout shortcut.
+    $('#settings-open').hidden=enabled&&!admin;
+    $('#staff-logout').hidden=!enabled||admin;
     $('#account-logout').disabled=!user;onChange({enabled,user,offline});
   }
   const status=value=>{$('#login-message').textContent=value;$('#login-message').hidden=!value;};
