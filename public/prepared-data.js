@@ -3,8 +3,8 @@ import { MONTHLY_PARSER_VERSION } from './monthly.js';
 
 // Keep each column name and object key once per workbook, while preserving all
 // source cells for the full meter card and each monthly row for analysis.
-export function packRegistry(sheets, skipped = []) {
-  return { format: 1, role: 'registry', skipped, sheets: sheets.map(({ sheet, file, layout, records }) => ({
+export function packRegistry(sheets, skipped = [], warnings = []) {
+  return { format: 1, role: 'registry', skipped, ...(warnings.length?{warnings}:{}), sheets: sheets.map(({ sheet, file, layout, records }) => ({
     sheet, file, layout, rows: records.map(({ row, values }) => [row, values]),
   })) };
 }
