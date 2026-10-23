@@ -4,7 +4,7 @@ import { hashPassword,verifyPassword,assertManager,fault } from './accounts.mjs'
 const bootstrapId='00000000-0000-4000-8000-000000000001';
 export function createAccountStore(pool,ready){
   async function tx(work){await ready();const client=await pool.connect();try{await client.query('BEGIN');const result=await work(client);await client.query('COMMIT');return result;}catch(error){await client.query('ROLLBACK').catch(()=>{});if(error.code==='23505')throw fault('Этот логин уже занят.',409,'login_exists');throw error;}finally{client.release();}}
-  const fields='id,login,full_name,role,active,is_bootstrap,created_at';
+  const fields='id,login,full_name,role,active,is_bootstrap,created_at,res_paths';
   return {
     async ensureBootstrap(config){
       await ready();const {rows:[prior]}=await pool.query('SELECT * FROM abonent_accounts WHERE id=$1',[bootstrapId]);
@@ -29,10 +29,10 @@ export function createAccountStore(pool,ready){
         const role=data.role||current?.role||'user';assertManager(manager,{role});
         if(!id&&!hash)throw fault('Для новой учётной записи нужен пароль.');
         if(id===actor.id&&(role!==current.role||data.active===false))throw fault('Нельзя отключить себя или изменить свою роль.',409);
-        const values=[id||randomUUID(),data.login||current?.login,data.name||current?.full_name,hash||current?.password_hash,role,data.active??current?.active??true];
-        const {rows:[saved]}=await client.query(`INSERT INTO abonent_accounts(id,login,full_name,password_hash,role,active) VALUES($1,$2,$3,$4,$5,$6)
-          ON CONFLICT(id) DO UPDATE SET login=EXCLUDED.login,full_name=EXCLUDED.full_name,password_hash=EXCLUDED.password_hash,role=EXCLUDED.role,active=EXCLUDED.active RETURNING ${fields}`,values);
-        if(current&&(hash||current.role!==role||current.login!==saved.login||!saved.active))await client.query('DELETE FROM abonent_sessions WHERE account_id=$1',[id]);
+        const values=[id||randomUUID(),data.login||current?.login,data.name||current?.full_name,hash||current?.password_hash,role,data.active??current?.active??true,data.resPaths??current?.res_paths??[]];
+        const {rows:[saved]}=await client.query(`INSERT INTO abonent_accounts(id,login,full_name,password_hash,role,active,res_paths) VALUES($1,$2,$3,$4,$5,$6,$7)
+          ON CONFLICT(id) DO UPDATE SET login=EXCLUDED.login,full_name=EXCLUDED.full_name,password_hash=EXCLUDED.password_hash,role=EXCLUDED.role,active=EXCLUDED.active,res_paths=EXCLUDED.res_paths RETURNING ${fields}`,values);
+        if(current&&(hash||current.role!==role||current.login!==saved.login||!saved.active||JSON.stringify(current.res_paths)!==JSON.stringify(saved.res_paths)))await client.query('DELETE FROM abonent_sessions WHERE account_id=$1',[id]);
         return saved;
       });
     },
