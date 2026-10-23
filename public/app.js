@@ -1105,7 +1105,45 @@ const diagnosticsUI = initDiagnosticsUI({ openDialog, showSettings, context: () 
 }) });
 accountUI=initAccountUI({canRefresh:()=>!usingOfflineCopy,onChange:({enabled,user})=>{if(enabled&&!user){if(busy)stopLoading();loads.start();clearDataset();adminUI.reset();}renderIndicators();},onLogout:()=>{adminUI.reset();clearDataset();}});
 const adminUI=initAdminUI({account:()=>accountUI.user,onDatabaseChanged:()=>{if(busy)stopLoading();void loadMap.refresh();directoryState='idle';folderRead=null;}});
-const analysisUI = initAnalysisUI({ request: monthlyRPC, isReady: () => consumptionState === 'ready', getIncoming: () => ({ ready: incomingState === 'ready', name: incomingFile?.name }), showConnection: showSettings, onMapOpen: loadMap.refresh,onAdminOpen:adminUI.refresh });
+async function sochiAnalysisRequest(action,payload={},transfer=[],onProgress=()=>{}){
+  if(config.sochi && navigator.onLine && !usingOfflineCopy && ['analysisConsumer','analysisTP','analysisTPs'].includes(action)){
+    if(!selectedRes)throw new Error('Выберите РЭС.');
+    const response=await fetch(new URL('./api/analysis',location.href),{
+      method:'POST',credentials:'same-origin',cache:'no-store',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({resPath:selectedRes.path,action,account:payload.account,tp:payload.tp,point:payload.point}),
+      signal:AbortSignal.timeout(120000),
+    });
+    const data=await response.json();
+    if(!response.ok)throw Object.assign(new Error(data.error||'Анализ недоступен.'),{status:response.status,code:data.code});
+    return data.result;
+  }
+  return monthlyRPC(action,payload,transfer,onProgress);
+}
+async function sochiSettings(){
+  if(!config.sochi||!navigator.onLine)return null;
+  const response=await fetch(new URL('./api/analysis-settings',location.href),{credentials:'same-origin',cache:'no-store'});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||'Не удалось получить настройки базы.');
+  return data.settings;
+}
+async function saveSochiSettings(settings){
+  if(!config.sochi)return;
+  if(!accountUI?.isAdmin)throw new Error('Только администратор может менять расчёты.');
+  const response=await fetch(new URL('./api/admin/analysis-settings',location.href),{
+    method:'POST',credentials:'same-origin',cache:'no-store',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({settings}),
+  });
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||'Не удалось сохранить настройки.');
+}
+const analysisUI = initAnalysisUI({
+  request:sochiAnalysisRequest, isReady:()=>consumptionState==='ready',
+  getIncoming:()=>({ready:incomingState==='ready',name:incomingFile?.name}),
+  showConnection:showSettings,onMapOpen:loadMap.refresh,onAdminOpen:adminUI.refresh,
+  canTune:()=>!config.sochi||Boolean(accountUI?.isAdmin),
+  loadSettings:sochiSettings,saveSettings:saveSochiSettings,
+});
 $('#record-body').addEventListener('click', e => {
   if(e.target.closest('[data-mark-consumer]') && activeRecord){void userNoteEditor.open(activeRecord);return;}
   if (e.target.closest('#consumer-analyze') && activeRecord) analysisUI.openConsumer(activeRecord.fields.account, { point: activeRecord.fields.point, pointNumber: activeRecord.fields.pointNumber, pointName: activeRecord.fields.pointName });
@@ -1237,6 +1275,7 @@ if ('serviceWorker' in navigator) {
 const startupSignal = loads.signal;
 await readConfiguration(startupSignal);
 await accountUI.start(config.auth);
+await analysisUI.refreshSettings();
 if (proxy && config.prepared && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register('./service-worker.js', { updateViaCache:'none' }).catch(() => navigator.serviceWorker.getRegistration()).then(registration => {
     if (registration?.update) registration.update().catch(() => {});
