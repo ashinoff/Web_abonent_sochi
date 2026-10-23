@@ -12,6 +12,7 @@ import { createNotificationsHandler } from './user-notifications.mjs';
 import { createSochiAnalytics } from './sochi-analytics.mjs';
 import { createSochiRegistry } from './sochi-registry.mjs';
 import { receiveSochiWorkbook } from './sochi-import.mjs';
+import { createSochiChunkUploads } from './sochi-chunk-upload.mjs';
 import { preparationMemory } from './prepared-service.mjs';
 import { fault, superAdminConfig } from './accounts.mjs';
 import { sourceRoleKeys } from './public/source.js';
@@ -70,6 +71,39 @@ export function createSochiServer(options={}) {
     refreshCatalog:async()=>{throw fault('Синхронизация с внешними дисками отключена.',405);},
   });
   let uploadQueue=Promise.resolve();
+  const uploads=createSochiChunkUploads();
+  async function logUploadFailure(actor,resPath,role,error) {
+    // The original Excel remains in a temporary file only; logs contain
+    // the reason and scope, never file bytes or customer data.
+    try {
+      await store.appendAdminEvent(SOCHI_SOURCE,{
+        category:'upload',code:'upload_failed',resPath,actor:actor.login,
+        message:'Не удалось загрузить '+role+': '+String(error.message||'Ошибка обработки Excel').slice(0,320),
+      });
+    } catch(logError) {
+      console.warn('Sochi upload audit log unavailable:',logError.message);
+    }
+  }
+  async function saveUploaded(actor,{resPath,role,filename},received) {
+    const extension=/\.xls$/i.test(filename||'')?'.xls':'.xlsx';
+    const path=canonicalSochiPath(resPath,role,extension);
+    const status=await store.saveSochiUpload(SOCHI_SOURCE,{
+      resPath,role,path,filename,size:received.size,revision:received.revision,
+      json:received.json,actor:actor.login,
+    });
+    registry.invalidate(resPath);
+    analytics.invalidate(resPath);
+    return {ok:true,role,resPath,status};
+  }
+  // Only the memory-intensive workbook preparation + DB swap are serialized;
+  // small authenticated chunks may arrive while an unrelated file is parsed.
+  async function sequentialSave(work) {
+    const prior=uploadQueue;
+    let release;
+    uploadQueue=new Promise(resolve=>{release=resolve;});
+    try {await prior;return await work();}
+    finally {release();}
+  }
   const server=http.createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','no-referrer');
@@ -110,41 +144,62 @@ export function createSochiServer(options={}) {
         res.end(file.buffer);
         return;
       }
+      if(url.pathname==='/api/admin/upload/start') {
+        const actor=await access.requireAdmin(req);
+        if(req.method!=='POST')throw fault('Метод не поддерживается.',405);
+        const body=await readAdminJson(req);
+        onlyFields(body,['resPath','role','filename','size']);
+        if(!SOCHI_RES_PATHS.includes(body.resPath)||!sourceRoleKeys.includes(body.role))
+          throw fault('Выберите РЭС и тип файла.');
+        const result=await uploads.start({actor,...body});
+        sendJson(res,200,{ok:true,...result});
+        return;
+      }
+      if(url.pathname==='/api/admin/upload/chunk') {
+        const actor=await access.requireAdmin(req);
+        if(req.method!=='POST')throw fault('Метод не поддерживается.',405);
+        const uploadId=url.searchParams.get('uploadId');
+        const index=Number(url.searchParams.get('index'));
+        const result=await uploads.chunk(req,{actor,uploadId,index});
+        sendJson(res,200,{ok:true,...result});
+        return;
+      }
+      if(url.pathname==='/api/admin/upload/complete') {
+        const actor=await access.requireAdmin(req);
+        if(req.method!=='POST')throw fault('Метод не поддерживается.',405);
+        const body=await readAdminJson(req);
+        onlyFields(body,['uploadId']);
+        const result=await sequentialSave(()=>uploads.complete({
+          actor,uploadId:body.uploadId,
+          save:(session,received)=>saveUploaded(actor,session,received),
+          onError:(session,error)=>logUploadFailure(actor,session.resPath,session.role,error),
+        }));
+        sendJson(res,200,result);
+        return;
+      }
+      if(url.pathname==='/api/admin/upload/cancel') {
+        const actor=await access.requireAdmin(req);
+        if(req.method!=='POST')throw fault('Метод не поддерживается.',405);
+        const body=await readAdminJson(req);
+        onlyFields(body,['uploadId']);
+        sendJson(res,200,await uploads.cancel({actor,uploadId:body.uploadId}));
+        return;
+      }
       if(url.pathname==='/api/admin/upload') {
         const actor=await access.requireAdmin(req);
         if(req.method!=='POST')throw fault('Метод не поддерживается.',405);
         const resPath=url.searchParams.get('resPath'),role=url.searchParams.get('role'),filename=url.searchParams.get('filename');
         if(!SOCHI_RES_PATHS.includes(resPath)||!sourceRoleKeys.includes(role))throw fault('Выберите РЭС и тип файла.');
-        const extension=/\.xls$/i.test(filename||'')?'.xls':'.xlsx';
-        const path=canonicalSochiPath(resPath,role,extension);
-        // A serial import queue avoids overlapping large Excel parser processes.
-        const prior=uploadQueue;
-        let release;
-        uploadQueue=new Promise(resolve=>{release=resolve;});
         try {
-          await prior;
-          try {
+          const result=await sequentialSave(async()=>{
             const received=await receiveSochiWorkbook(req,{role,filename});
-            const status=await store.saveSochiUpload(SOCHI_SOURCE,{
-              resPath,role,path,filename,size:received.size,revision:received.revision,json:received.json,actor:actor.login,
-            });
-            registry.invalidate(resPath);
-            analytics.invalidate(resPath);
-            sendJson(res,200,{ok:true,role,resPath,status});
-          } catch(error) {
-            // Record failed imports in "Анализ базы" without storing Excel
-            // contents. Never replace a working snapshot on parser failure.
-            try {
-              await store.appendAdminEvent(SOCHI_SOURCE,{
-                category:'upload',code:'upload_failed',resPath,actor:actor.login,
-                message:'Не удалось загрузить '+role+': '+String(error.message||'Ошибка обработки Excel').slice(0,320),
-              });
-            } catch(logError) {
-              console.warn('Sochi upload audit log unavailable:',logError.message);
-            }
-            throw error;
-          }
-        } finally {release();}
+            return saveUploaded(actor,{resPath,role,filename},received);
+          });
+          sendJson(res,200,result);
+        } catch(error) {
+          await logUploadFailure(actor,resPath,role,error);
+          throw error;
+        }
         return;
       }
       if(url.pathname==='/api/admin/analysis-settings') {
@@ -248,7 +303,9 @@ export function createSochiServer(options={}) {
   });
   server.preparedStore=store;
   server.accessControl=access;
-  server.on('close',()=>{Promise.resolve(store.close?.()).catch(()=>{});});
+  server.on('close',()=>{
+    void Promise.allSettled([Promise.resolve(store.close?.()),uploads.close()]);
+  });
   return server;
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
