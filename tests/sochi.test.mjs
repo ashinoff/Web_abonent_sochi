@@ -93,6 +93,36 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     const errorsView=await (await api('/api/admin/database',{headers:{Cookie:adminCookie}})).json();
     assert.ok(errorsView.events.some(event=>event.code==='upload_failed'&&event.res_path===SOCHI_RES_PATHS[0]),
       'failed imports should be visible in admin database analysis');
+    // Known workbook errors go to the authenticated UI with an exact Excel
+    // coordinate, instead of an unhelpful generic HTTP 500 message.
+    const badNumber=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(badNumber,XLSX.utils.aoa_to_sheet([
+      ['ЛС','Номер счетчика'],['000001',1234567890123456],
+    ]),'Реестр');
+    const registryUploadRoute='/api/admin/upload?resPath='+encodeURIComponent(SOCHI_RES_PATHS[0])+'&role=registry&filename='+encodeURIComponent('Расширенный список.xlsx');
+    const rejected=await api(registryUploadRoute,{method:'POST',
+      headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
+      body:XLSX.write(badNumber,{type:'buffer',bookType:'xlsx'})});
+    const reason=await rejected.json();
+    assert.equal(rejected.status,422,JSON.stringify(reason));
+    assert.match(reason.error,/Строка 2: ячейка B2.*Номер счетчика.*Excel мог округлить/);
+
+    // Secondary TT factory serials are still visible but are not keys for
+    // subscriber search. The import succeeds with an integrity warning.
+    const peripheral=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(peripheral,XLSX.utils.aoa_to_sheet([
+      ['ЛС','Номер счетчика','Заводской номер ТТ (А)'],
+      ['000001','00000012345678',1234567890123456],
+    ]),'Реестр');
+    const accepted=await api(registryUploadRoute,{method:'POST',
+      headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
+      body:XLSX.write(peripheral,{type:'buffer',bookType:'xlsx'})});
+    const savedWithWarning=await accepted.json();
+    assert.equal(accepted.status,200,JSON.stringify(savedWithWarning));
+    assert.ok(savedWithWarning.warnings?.some(note=>/Столбец C.*Заводской номер ТТ/.test(note)));
+    const currentAdmin=await (await api('/api/admin/database',{headers:{Cookie:adminCookie}})).json();
+    assert.ok(currentAdmin.folders.find(f=>f.res_path===SOCHI_RES_PATHS[0]).statuses.registry.warnings.some(note=>/Столбец C/.test(note)));
+
 
     // Amvera-style ingress rejects large single bodies: the new API must
     // accept a real Excel workbook split into many small authenticated POSTs.
