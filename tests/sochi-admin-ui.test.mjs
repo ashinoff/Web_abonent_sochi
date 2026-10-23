@@ -108,3 +108,70 @@ test('Sochi admin sees seven RES scopes, manages staff visibility and uploads XL
   await until(()=>changeCount===1,'admin upload completion');
   assert.match($('#admin-upload-message').textContent,/Готово.*Краснополянский РЭС/);
 });
+
+
+test('Choosing an Excel starts upload immediately, reports status and supports retry after a server error',async t=>{
+  const page=new Window({url:'https://sochi.example.test/',settings:{disableCSSFileLoading:true,disableJavaScriptFileLoading:true}});
+  page.document.write(await readFile(new URL('../public/index.html',import.meta.url),'utf8'));
+  for(const [key,value] of Object.entries({window:page,document:page.document,location:page.location,navigator:{onLine:true}})){
+    Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});
+  }
+  const $=selector=>page.document.querySelector(selector),pending=[],uploads=[];
+  const admin={id:'admin-2',role:'superadmin',active:true,login:'admin2',name:'Администратор'};
+  let completed=0;
+  const fetcher=async(input,options={})=>{
+    const url=new URL(input);
+    if(url.pathname==='/api/admin/upload'){
+      uploads.push({url,options});
+      return new Promise(resolve=>pending.push(resolve));
+    }
+    if(url.pathname==='/api/admin/accounts')return Response.json({accounts:[admin]});
+    if(url.pathname==='/api/admin/database')return Response.json({
+      overview:{database_bytes:'200',snapshot_count:0,payload_bytes:'0',account_count:1},
+      folders:SOCHI_RES_PATHS.map(res_path=>({
+        res_path,res_name:res_path.split('/').at(-1),
+        enterprise_name:'Сочинское предприятие электрических сетей',
+        statuses:{},load_blocked:false,local_blocked:false
+      })),
+      events:[],globalBlocked:false
+    });
+    throw new Error('Unexpected request '+url.pathname);
+  };
+  initAdminUI({account:()=>admin,fetcher,onDatabaseChanged:()=>completed++});
+  t.after(async()=>{page.dispatchEvent(new page.Event('pagehide'));await page.happyDOM.close();});
+  $('#admin-settings').hidden=false;
+  $('#admin-upload-res').value=SOCHI_RES_PATHS[2];
+  $('#admin-upload-role').value='consumption';
+  const file={name:'ПО по месячно.xlsx',size:16384};
+  const picker=$('#admin-upload-file');
+  Object.defineProperty(picker,'files',{configurable:true,value:[file]});
+  picker.dispatchEvent(new page.Event('change',{bubbles:true}));
+  await until(()=>uploads.length===1,'automatic upload begins after choosing file');
+  assert.equal(uploads[0].url.searchParams.get('resPath'),SOCHI_RES_PATHS[2]);
+  assert.equal(uploads[0].url.searchParams.get('role'),'consumption');
+  assert.equal(uploads[0].options.body,file);
+  assert.match($('#admin-upload-selected-name').textContent,/ПО по месячно.xlsx/);
+  assert.equal($('#admin-upload-selected').hidden,false);
+  assert.equal($('#admin-upload-progress').hidden,false);
+  assert.equal($('#admin-upload-progress').dataset.stage,'sending');
+  assert.equal($('#admin-upload-submit').disabled,true);
+  assert.equal($('#admin-upload-role').disabled,true);
+  assert.match($('#admin-upload-message').textContent,/Загрузка началась/);
+  $('#admin-upload-form').dispatchEvent(new page.Event('submit',{bubbles:true,cancelable:true}));
+  await delay(20);
+  assert.equal(uploads.length,1,'double-click must not send the same file twice');
+  pending.shift()(Response.json({error:'Некорректная шапка ПО'},{status:400}));
+  await until(()=>$('#admin-upload-progress').dataset.stage==='error','server error shown');
+  assert.match($('#admin-upload-message').textContent,/Некорректная шапка ПО/);
+  assert.equal($('#admin-upload-submit').disabled,false);
+  assert.equal($('#admin-upload-submit').textContent,'Повторить загрузку');
+  assert.equal(completed,0,'failed workbook must not be marked as saved');
+  $('#admin-upload-form').dispatchEvent(new page.Event('submit',{bubbles:true,cancelable:true}));
+  await until(()=>uploads.length===2,'retry starts a new request');
+  pending.shift()(Response.json({ok:true}));
+  await until(()=>completed===1,'successful retry completes');
+  assert.equal($('#admin-upload-progress').dataset.stage,'done');
+  assert.equal($('#admin-upload-progress-bar').value,100);
+  assert.match($('#admin-upload-message').textContent,/Готово.*Хостинский РЭС/);
+  assert.equal($('#admin-upload-res').disabled,false);
+});
