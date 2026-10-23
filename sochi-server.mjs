@@ -12,6 +12,7 @@ import { createNotificationsHandler } from './user-notifications.mjs';
 import { createSochiAnalytics } from './sochi-analytics.mjs';
 import { createSochiRegistry } from './sochi-registry.mjs';
 import { receiveSochiWorkbook } from './sochi-import.mjs';
+import { buildSochiTemplate } from './sochi-template.mjs';
 import { preparationMemory } from './prepared-service.mjs';
 import { fault, superAdminConfig } from './accounts.mjs';
 import { sourceRoleKeys } from './public/source.js';
@@ -89,6 +90,23 @@ export function createSochiServer(options={}) {
       if(url.pathname.startsWith('/api/')) {
         req.account=await access.require(req);
         if(!req.account)throw fault('Войдите в учётную запись.',401,'auth_required');
+      }
+      if(url.pathname==='/api/admin/template') {
+        // Template downloads are always authenticated, even though examples contain
+        // only fictitious data. A normal employee must not enter admin workflows.
+        await access.requireAdmin(req);
+        if(req.method!=='GET')throw fault('Метод не поддерживается.',405);
+        const role=url.searchParams.get('role');
+        if(!sourceRoleKeys.includes(role))throw fault('Выберите тип файла.');
+        const file=buildSochiTemplate(role);
+        res.writeHead(200,{
+          'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(file.filename),
+          'Content-Length':file.buffer.length,
+          'Cache-Control':'no-store',
+        });
+        res.end(file.buffer);
+        return;
       }
       if(url.pathname==='/api/admin/upload') {
         const actor=await access.requireAdmin(req);
