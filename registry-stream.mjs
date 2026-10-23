@@ -1,6 +1,6 @@
 import { openSync, closeSync, writeSync } from 'node:fs';
 import * as XLSX from '@e965/xlsx';
-import { clean, detectLayout, identifierColumns, criticalIdentifierColumns, unsafeNumericIdentifier, identifierIssue, identifierWarnings, restoreIdentifier, isRegistryDataRow } from './public/core.js';
+import { clean, detectLayout, identifierColumns, criticalIdentifierColumns, unsafeNumericIdentifier, longNumericIdentifier, identifierIssue, identifierWarnings, restoreIdentifier, isRegistryDataRow } from './public/core.js';
 import { openStreamingWorkbook, parseXML, column, excelText, xmlError, MAX_CELL_BYTES, MAX_ENTRY_BYTES } from './xlsx-stream.mjs';
 
 const registryLimit = () => new Error('Реестр слишком большой: максимум 100 000 строк и 256 столбцов на лист.');
@@ -155,10 +155,15 @@ export async function writeRegistryXLSX(path, output, filename = '') {
               invalid.count++;
               if(invalid.examples.length<8)invalid.examples.push(identifierIssue(number,c,layout.labels[c]));
             }else warnings.add(c,layout.labels[c],number);
-            // Never fabricate an original serial from a potentially rounded
-            // number. Secondary serials retain their Excel display and warn.
+            // Non-safe integers cannot supply trustworthy key IDs. Secondary
+            // serials remain visible exactly as Excel rendered them.
             return clean(value);
           }
+          if(longNumericIdentifier(cell))
+            // A precisely representable 16-digit meter must remain searchable
+            // under its full number. Warn that the source Excel may have
+            // rounded the original input, without changing its stored digits.
+            warnings.add(c,layout.labels[c],number);
           return clean(restoreIdentifier(value,cell,number,{column:c,label:layout.labels[c]}));
         });
         if(invalidRow)return;
