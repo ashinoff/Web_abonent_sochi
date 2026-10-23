@@ -62,7 +62,7 @@ const dialogControls = new Map();
 const requests = new Map();
 const loads = createLoadSession();
 try { prefs = JSON.parse(localStorage.getItem('abonent.preferences.v1') || '{}'); } catch { /* Preferences are optional. */ }
-const sourceFiles = initSourceFiles($('#source-files'), { onRead: useSourceFile, onRefresh: refreshResFiles });
+const sourceFiles = initSourceFiles($('#source-files'), { onRead: useSourceFile, onRefresh: refreshResFiles, readOnly:()=>Boolean(config.sochi) });
 function savePrefs() { try { localStorage.setItem('abonent.preferences.v1', JSON.stringify(prefs)); } catch { /* Private browsing can disable storage. */ } }
 function createWorkbookWorker() { return new Worker(new URL('./worker.js?v=19', import.meta.url)); }
 function getWorker() {
@@ -145,7 +145,7 @@ function setBusy(value, text = '') {
   busy = value; busyText = text;
   for (const sel of ['#confirm-mapping', '#local-file', '#search-submit', '#tp-open', '#local-monthly']) $(sel).disabled = value;
   $('#read-folders').disabled = value || sourceState === 'loading' || directoryState === 'loading';
-  $('#district-button').disabled = false;
+  $('#district-button').disabled = Boolean(config.sochi);
   $('#res-button').disabled = !selectedFolder;
   if (text || !value) message('#settings-message', text, value);
   updateSource(); renderIndicators(); renderResults();
@@ -158,6 +158,7 @@ function openDialog(id) {
 }
 function showSettings() { renderIndicators(); analysisUI.settingsTab('connection'); openDialog('settings-dialog'); }
 function showEnterprises() {
+  if(config.sochi){showRes();return;}
   openDialog('enterprise-dialog'); renderFolders();
   if (sourceState !== 'loading' && directoryState !== 'ready' && !busy) readFolders();
 }
@@ -166,7 +167,7 @@ function showRes() {
   openDialog('res-dialog'); renderResFolders();
   if (resState === 'error' && !busy) openFolder(selectedFolder, { choose: true });
 }
-function rootUrl() { return clean(config.publicUrl); }
+function rootUrl() {const key=clean(config.publicUrl);return config.sochi&&accountUI?.user?.id?key+'@'+accountUI.user.id:key;}
 function offlineRoot() { return rootUrl() || prefs.root || ''; }
 function renderOfflineAvailability(copies, error = false) {
   const count = copies.filter(copy => copy.files.some(file => file.role === 'registry')).length;
@@ -288,7 +289,7 @@ function renderIndicators() {
   } });
 }
 function renderSourceState() {
-  const text = sourceState === 'loading' ? 'Получаем настройки общей папки…' : sourceState === 'error' ? 'Не удалось получить настройки источника. Проверьте соединение и повторите.' : sourceState === 'missing' ? 'Общая папка ещё не подключена. Администратору нужно указать ссылку в переменной YANDEX_PUBLIC_URL в Амвере.' : '';
+  const text = sourceState === 'loading' ? 'Проверяем базу…' : sourceState === 'error' ? 'Нет связи с сервером. Повторите попытку.' : sourceState === 'missing' ? 'База ещё не готова. Обратитесь к администратору.' : '';
   message('#source-setup-message', text);
   $('#read-folders').disabled = busy || sourceState === 'loading' || directoryState === 'loading';
   renderIndicators(); renderFolders();
@@ -303,7 +304,7 @@ async function readConfiguration(signal = loads.signal) {
       if (remote.proxy !== true) throw new Error('Неизвестный ответ сервера.');
       proxy = true; config = { ...initial, ...remote, publicUrl: remote.publicUrl || '' };
       watchAuthentication();
-      try { localStorage.setItem('abonent.server.v1', JSON.stringify({ publicUrl: config.publicUrl, prepared: config.prepared,auth:config.auth })); } catch {}
+      try { localStorage.setItem('abonent.server.v1', JSON.stringify({ publicUrl: config.publicUrl, prepared: config.prepared,auth:config.auth,sochi:config.sochi,localUploads:config.localUploads,databaseConnected:config.databaseConnected })); } catch {}
     } else if (response.status === 404 || response.ok) {
       if (!loads.current(signal)) return;
       proxy = false; config = { ...initial };
@@ -315,7 +316,7 @@ async function readConfiguration(signal = loads.signal) {
     try {
       const saved = JSON.parse(localStorage.getItem('abonent.server.v1') || 'null');
       if(saved?.auth)config.auth=saved.auth;
-      if (saved?.publicUrl && prefs.root === saved.publicUrl && saved.prepared) {
+      if (saved?.publicUrl && (prefs.root === saved.publicUrl || prefs.root?.startsWith(saved.publicUrl+'@')) && saved.prepared) {
         proxy = true; config = { ...initial, ...saved }; sourceState = 'ready'; directoryOffline = true;
       } else sourceState = 'error';
     } catch { sourceState = 'error'; }
@@ -326,13 +327,15 @@ async function readConfiguration(signal = loads.signal) {
   refreshOfflineAvailability();
 }
 function validateRoot(value) {
+  if(config.sochi&&value.startsWith('sochi:local:v1'))return value;
   try { const u = new URL(value); if (u.protocol === 'https:' && !u.username && !u.password && !u.port && ['disk.yandex.ru', 'disk.yandex.com', 'disk.yandex.net', 'disk.360.yandex.ru', 'yadi.sk'].includes(u.hostname) && /^\/(d|i)\/[\w-]+\/?$/.test(u.pathname)) return `${u.origin}${u.pathname}`; } catch {}
   throw new Error('Адрес общей папки настроен некорректно. Обратитесь к администратору приложения.');
 }
 async function apiRequest(action, path = '/', offset = 0, legacy = false, signal = loads.signal) {
   if (proxy && !navigator.onLine) throw new Error('Нет подключения к сети.');
   const base = config.apiBase || (proxy ? new URL('./api/', location.href).href : 'https://cloud-api.yandex.net/v1/disk/public/');
-  const directory = action === 'resources' && proxy && config.prepared && config.databaseConnected && !legacy;
+  if(config.sochi && action!=='resources')throw new Error('Исходные файлы загружаются только администратором.');
+  const directory = action === 'resources' && (config.sochi || (proxy && config.prepared && config.databaseConnected && !legacy));
   const endpoint = directory ? 'directory' : proxy || config.apiBase ? action : action === 'download' ? 'resources/download' : 'resources';
   const url = new URL(endpoint, base.endsWith('/') ? base : base + '/');
   if (!proxy && !config.apiBase) url.searchParams.set('public_key', validateRoot(rootUrl()));
@@ -340,9 +343,9 @@ async function apiRequest(action, path = '/', offset = 0, legacy = false, signal
   if (action === 'resources') { url.searchParams.set('offset', offset); url.searchParams.set('limit', 100); url.searchParams.set('sort', 'name'); }
   let response;
   try { response = await fetch(url, { signal: requestSignal(signal, action === 'download' ? 90000 : 25000), credentials: 'same-origin' }); }
-  catch { signal.throwIfAborted(); throw new Error(proxy ? 'Нет ответа от Яндекс Диска. Проверьте соединение и повторите.' : 'Браузер не смог получить файл с Яндекс Диска. Откройте Excel с устройства или используйте версию на Амвере.'); }
+  catch { signal.throwIfAborted(); throw new Error(config.sochi ? 'Нет ответа от базы данных. Проверьте соединение.' : proxy ? 'Нет ответа от Яндекс Диска. Проверьте соединение и повторите.' : 'Браузер не смог получить файл с Яндекс Диска.'); }
   signal.throwIfAborted();
-  if (directory && [404,502,503].includes(response.status)) return apiRequest(action,path,offset,true,signal);
+  if (!config.sochi && directory && [404,502,503].includes(response.status)) return apiRequest(action,path,offset,true,signal);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const text = { 404: 'Папка не найдена. Проверьте ссылку и доступ.', 403: 'Доступ к файлу ограничен. Разрешите скачивание по ссылке.', 429: 'Слишком много запросов к Диску. Повторите позже.', 413: 'Файл превышает 40 МБ.' };
@@ -489,7 +492,7 @@ async function refreshResFiles() {
   await openRes(selectedRes, { keepSettings: true });
 }
 async function useSourceFile(role, path) {
-  if (busy || folderRead || !selectedRes || filesState !== 'ready' || !sourceRoleKeys.includes(role)) return;
+  if (config.sochi || busy || folderRead || !selectedRes || filesState !== 'ready' || !sourceRoleKeys.includes(role)) return;
   const choices = { ...prefs.fileChoices };
   if (path === null) {
     delete choices[role]; prefs.fileChoices = choices; savePrefs();
@@ -520,17 +523,17 @@ async function openRes(res, { keepSettings = false, offlineCopy = null } = {}) {
     const offlineOnly = Boolean(offlineCopy);
     let items = offlineOnly ? offlineCopy.files.map(file => ({ type:'file', path:file.path, name:file.path.split('/').at(-1) })) : await listFolder(res.path, false, signal);
     if (!loads.current(signal)) return;
-    if (!offlineOnly && proxy && config.prepared && Object.values(prefs.fileChoices || {}).some(choice => choice?.path && !items.some(item => item.path === choice.path))) {
+    if (!config.sochi && !offlineOnly && proxy && config.prepared && Object.values(prefs.fileChoices || {}).some(choice => choice?.path && !items.some(item => item.path === choice.path))) {
       items = await listFolder(res.path, true, signal);
       if (!loads.current(signal)) return;
     }
     folderItems = items.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-    let choices = prefs.fileChoices;
+    let choices = config.sochi ? {} : prefs.fileChoices;
     if ((offlineOnly || directoryOffline) && config.prepared) {
       const copy = offlineCopy || (await listOfflineCopies(rootUrl()).catch(() => [])).find(item => item.resPath === res.path);
       if (!loads.current(signal)) return;
       const savedChoices = Object.fromEntries((copy?.files || []).map(file => [file.role, { path:file.path }]));
-      choices = offlineOnly ? savedChoices : { ...savedChoices, ...prefs.fileChoices };
+      choices = offlineOnly ? savedChoices : config.sochi ? savedChoices : { ...savedChoices, ...prefs.fileChoices };
       if (offlineOnly) { prefs.fileChoices = savedChoices; savePrefs(); }
     }
     filesState = 'ready'; diskState = directoryOffline ? 'disconnected' : 'connected';
@@ -581,7 +584,7 @@ async function downloadFile({ keepSettings = false, signal = loads.signal, offli
   const folder = selectedFolder, res = selectedRes, selected = selectedFile;
   try {
     registryState = 'checking'; registryError = ''; setBusy(true, 'Загружаем реестр…');
-    if (proxy && config.prepared && (offlineOnly || !customMappingSaved()) && selected.path) {
+    if (proxy && config.prepared && (config.sochi || offlineOnly || !customMappingSaved()) && selected.path) {
       try {
         const listedIncoming = incomingFile;
         clearDataset(true); incomingFile = listedIncoming; incomingState = listedIncoming ? 'checking' : 'missing';
@@ -597,10 +600,11 @@ async function downloadFile({ keepSettings = false, signal = loads.signal, offli
       } catch (error) {
         if (!loads.current(signal)) return;
         if ([401,403].includes(error.status) || error.code==='res_changed')throw error;
-        if (offlineOnly || (selected.size || 0) > 8 * 1048576 || error.message.startsWith('MEMORY_LIMIT:'))
+        if (config.sochi || offlineOnly || (selected.size || 0) > 8 * 1048576 || error.message.startsWith('MEMORY_LIMIT:'))
           throw new Error(error.message.replace(/^MEMORY_LIMIT:\s*/, ''));
       }
     }
+    if(config.sochi)throw new Error('Реестр загружает в базу администратор.');
     const { file, buffer } = await fetchWorkbook(selected, signal);
     if (!loads.current(signal)) return;
     selectedFile = file;
@@ -628,11 +632,12 @@ async function readIncomingFile(signal = loads.signal, offlineOnly = false) {
       } catch (error) {
         if (!loads.current(signal) || op !== operation) return;
         if ([401,403].includes(error.status) || error.code==='res_changed')throw error;
-        if (offlineOnly || (file.size || 0) > 8 * 1048576 || error.message.startsWith('MEMORY_LIMIT:'))
+        if (config.sochi || offlineOnly || (file.size || 0) > 8 * 1048576 || error.message.startsWith('MEMORY_LIMIT:'))
           throw new Error(error.message.replace(/^MEMORY_LIMIT:\s*/, ''));
         // A small incompatible workbook can still use local Excel reading.
       }
     }
+    if(config.sochi)throw new Error('Исходный Excel доступен только администратору.');
     const { buffer, file: latest } = await fetchWorkbook(file, signal);
     if (!loads.current(signal) || op !== operation) return;
     Object.assign(file, latest);
@@ -658,11 +663,12 @@ async function readConsumptionFile(signal = loads.signal, offlineOnly = false, l
       } catch (error) {
         if (!loads.current(signal) || op !== operation) return;
         if ([401,403].includes(error.status) || error.code==='res_changed')throw error;
-        if (offlineOnly || (file.size || 0) > 8 * 1048576 || error.message.startsWith('MEMORY_LIMIT:'))
+        if (config.sochi || offlineOnly || (file.size || 0) > 8 * 1048576 || error.message.startsWith('MEMORY_LIMIT:'))
           throw new Error(error.message.replace(/^MEMORY_LIMIT:\s*/, ''));
         // A small incompatible workbook can still use local Excel reading.
       }
     }
+    if(config.sochi)throw new Error('Исходный Excel доступен только администратору.');
     const { buffer, file: latest } = await fetchWorkbook(file, signal);
     if (!loads.current(signal) || op !== operation) return;
     Object.assign(file, latest);
@@ -690,7 +696,8 @@ async function readJournalFile(role, signal = loads.signal, offlineOnly = false)
     if (proxy && config.prepared && file.path) {
       info = await monthlyRPC('loadPreparedJournal', { source: rootUrl(), path: file.path, role, offlineOnly });
     } else {
-      const { buffer, file: latest } = await fetchWorkbook(file, signal);
+      if(config.sochi)throw new Error('Журнал из базы не загружен.');
+    const { buffer, file: latest } = await fetchWorkbook(file, signal);
       if (!loads.current(signal) || op !== operation || source.file !== file) return;
       Object.assign(file, latest);
       info = await monthlyRPC('loadJournal', { buffer, role }, [buffer]);
@@ -846,7 +853,7 @@ async function confirmMapping(savedOverrides, automatic = false, signal = loads.
   } catch (error) { if (op !== operation || !loads.current(signal)) return; if (pending?.source.type === 'disk') registryState = 'error'; setBusy(false); message('#settings-message', error.message); showSettings(); }
 }
 async function startDemo() {
-  if (busy) return;
+  if (config.sochi || busy) return;
   const signal = loads.start();
   try {
     clearDataset(); selectedFolder = null; selectedRes = null; resFolders = []; resState = 'idle'; selectedFile = null; consumptionFile = null; consumptionState = 'idle'; registryState = 'idle'; setBusy(true, 'Открываем пример…');
@@ -865,9 +872,10 @@ async function startDemo() {
   finally { if (loads.current(signal)) setBusy(false); }
 }
 function updateSource() {
-  $('#district-label').textContent = currentSource?.folder || selectedFolder?.name || 'Выберите предприятие';
+  $('#district-label').textContent = config.sochi ? 'Сочинское предприятие электрических сетей' : currentSource?.folder || selectedFolder?.name || 'Выберите предприятие';
   $('#res-label').textContent = currentSource?.res || selectedRes?.name || (selectedFolder ? 'Выберите РЭС' : 'Сначала выберите предприятие');
   $('#res-button').disabled = !selectedFolder;
+  $('#district-button').disabled=Boolean(config.sochi);
   $('#demo-banner').hidden = !isDemo; $('#example-queries').hidden = !isDemo;
   document.querySelectorAll('[name="field"]').forEach(input => {
     const available = !summary || input.value === 'address' || summary.sheets.some(s => s.layout.mapping[input.value] !== undefined);
@@ -1172,7 +1180,7 @@ $('#res-list').addEventListener('click', e => { const button = e.target.closest(
 $('#confirm-mapping').addEventListener('click', () => confirmMapping());
 $('#mapping-fields').addEventListener('change', updateMapPreview);
 $('#local-file').addEventListener('change', async e => {
-  const file = e.target.files[0]; if (!file) return;
+  const file = e.target.files[0]; if (!file || config.sochi) return;
   const signal = loads.start();
   try {
     if (!isRegistryFile(file.name)) throw new Error(`Для поиска выберите файл «${REGISTRY_NAME}».`);
@@ -1186,7 +1194,7 @@ $('#local-file').addEventListener('change', async e => {
   finally { e.target.value = ''; }
 });
 $('#local-monthly').addEventListener('change', async e => {
-  const file = e.target.files[0]; if (!file) return;
+  const file = e.target.files[0]; if (!file || config.sochi) return;
   const signal = loads.start(), op = operation;
   try {
     if (!summary) throw new Error('Сначала откройте реестр и подтвердите его столбцы.');
@@ -1239,7 +1247,7 @@ if (proxy && config.prepared && 'serviceWorker' in navigator) {
   }).catch(() => { /* Online mode remains available. */ });
 }
 if (loads.current(startupSignal) && sourceState === 'ready' && await readFolders(startupSignal) && loads.current(startupSignal)) {
-  const savedFolder = folders.find(f => f.path === prefs.folder?.path);
+  const savedFolder = config.sochi ? folders[0] : folders.find(f => f.path === prefs.folder?.path);
   if (savedFolder) await openFolder(savedFolder, { restore: true });
 }
 window.addEventListener('offline', () => {
