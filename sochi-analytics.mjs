@@ -5,7 +5,7 @@ import { normalizeEventPack } from './public/journals.js';
 import { normalizeSettings } from './public/analysis-settings.js';
 import { fault } from './accounts.mjs';
 
-export function createSochiAnalytics({store,source}) {
+export function createSochiAnalytics({store,source,registry=null}) {
   const cache = new Map();
   const pending = new Map();
   async function build(resPath) {
@@ -28,8 +28,8 @@ export function createSochiAnalytics({store,source}) {
       };
       const monthly = await read('consumption');
       if (!monthly) throw fault('Пакет ПО отсутствует в базе.',404,'no_consumption');
-      const registry = await read('registry');
-      const records = registry ? unpackRegistry(registry).flatMap(sheet => sheet.records) : [];
+      const registryPack = registry ? null : await read('registry');
+      const records = registry ? await registry.analysisRecords(resPath) : registryPack ? unpackRegistry(registryPack).flatMap(sheet => sheet.records) : [];
       const instant = await read('instant');
       const events = await read('events');
       const service = createAnalysisService(indexMonthly(unpackMonthly(monthly)),records,{
@@ -47,10 +47,11 @@ export function createSochiAnalytics({store,source}) {
   return {
     invalidate(resPath) { cache.delete(resPath); },
     async query({resPath,action,account,tp,point}) {
-      if (!['analysisConsumer','analysisTP','analysisTPs'].includes(action)) {
+      if (!['analysisConsumer','analysisTP','analysisTPs','analysisSummary'].includes(action)) {
         throw fault('Неизвестный запрос анализа.',400,'invalid_analysis');
       }
       const service = await build(resPath);
+      if (action === 'analysisSummary') return service.summary;
       if (action === 'analysisTPs') return service.tps();
       const settings = normalizeSettings(await store.getSochiAnalysisSettings(source));
       if (action === 'analysisTP') {
