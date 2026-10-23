@@ -145,7 +145,8 @@ function setBusy(value, text = '') {
   busy = value; busyText = text;
   for (const sel of ['#confirm-mapping', '#local-file', '#search-submit', '#tp-open', '#local-monthly']) $(sel).disabled = value;
   $('#read-folders').disabled = value || sourceState === 'loading' || directoryState === 'loading';
-  $('#district-button').disabled = Boolean(config.sochi);
+  const oldEnterprisePicker=$('#district-button');
+  if(oldEnterprisePicker)oldEnterprisePicker.disabled=Boolean(config.sochi);
   $('#res-button').disabled = !selectedFolder;
   if (text || !value) message('#settings-message', text, value);
   updateSource(); renderIndicators(); renderResults();
@@ -187,7 +188,17 @@ function showEnterprises() {
   if (sourceState !== 'loading' && directoryState !== 'ready' && !busy) readFolders();
 }
 function showRes() {
-  if (!selectedFolder) { showEnterprises(); return; }
+  if (!selectedFolder) {
+    if (!config.sochi) { showEnterprises(); return; }
+    // The Sochi enterprise is fixed. Retry its catalog directly, never open
+    // an enterprise picker or ask staff to select an irrelevant parent.
+    openDialog('res-dialog');resState='loading';renderResFolders();
+    if(!busy)void readFolders().then(ok=>{
+      if(ok&&folders[0])return openFolder(folders[0],{choose:true});
+      resState='error';renderResFolders();
+    });
+    return;
+  }
   openDialog('res-dialog'); renderResFolders();
   if (resState === 'error' && !busy) openFolder(selectedFolder, { choose: true });
 }
@@ -272,7 +283,13 @@ function renderIndicators() {
       'Офлайн-копия ещё не готова. Загрузите данные или нажмите «Скачать на телефон» в карте загрузки.';
   }
   const cachedOffline = summary?.offline || consumptionInfo?.offline || incomingInfo?.offline || journalRoles.some(role => journalSources[role].info?.offline);
-  const baseState = sourceState === 'loading' ? 'checking' : !config.prepared ? (proxy ? 'off' : 'idle') : !navigator.onLine || cachedOffline ? 'off' : config.databaseConnected ? 'on' : 'off';
+  // In Sochi the base light is green only after a successful authenticated
+  // catalog read, not merely because /api/config declares PostgreSQL configured.
+  const baseState = sourceState === 'loading' || config.sochi && (directoryState === 'loading' || diskState === 'checking')
+    ? 'checking'
+    : !config.prepared ? (proxy ? 'off' : 'idle') : !navigator.onLine || cachedOffline ? 'off'
+    : config.sochi ? (diskState === 'connected' && sourceState === 'ready' ? 'on' : 'off')
+    : config.databaseConnected ? 'on' : 'off';
   const baseText = baseState === 'checking' ? 'Проверяем подключение к базе…' : !config.prepared ? 'База не подключена · доступен прежний режим Excel' : cachedOffline ? 'Открыты сохранённые данные с телефона' : baseState === 'on' ? 'Подготовленные данные базы доступны' : !navigator.onLine ? 'База недоступна · открыты сохранённые данные' : 'Нет связи с базой данных';
   const registryText = registryState === 'ready' || summary ? 'Реестр готов к поиску' : registryState === 'checking' ? busyText || 'Проверяем реестр…' : pending ? 'Подтвердите столбцы в настройках' : registryError || (registryState === 'missing' ? 'Файл реестра не найден' : registryState === 'error' ? 'Реестр не загружен' : 'Сначала выберите РЭС');
   const consumptionText = consumptionState === 'ready' ? 'Готов к анализу: ' + (consumptionFile?.name || 'Демонстрация') : consumptionState === 'checking' ? `Читаем «${consumptionFile?.name || CONSUMPTION_NAME}»…` : consumptionState === 'missing' ? `Файл «${CONSUMPTION_NAME}» не найден` : consumptionState === 'error' ? consumptionError || 'Не удалось прочитать файл потребления' : 'Сначала выберите РЭС';
@@ -284,8 +301,10 @@ function renderIndicators() {
     ['consumption', consumptionState === 'ready' ? 'on' : consumptionState === 'checking' ? 'checking' : consumptionState === 'idle' ? 'idle' : 'off', consumptionText],
   ]) {
     const indicator = $('#' + name + '-indicator');
-    indicator.dataset.state = state; indicator.title = label;
-    indicator.setAttribute('aria-label', `${{ base:'Чтение базы',registry:'Реестр',consumption:'Потребление',incoming:'Приём' }[name]}: ${label}`);
+    // Source lights are scoped to the current RES; only "base" is global.
+    const scopedLabel=config.sochi && name!=='base' && selectedRes ? selectedRes.name+' · '+label : label;
+    indicator.dataset.state = state; indicator.title = scopedLabel;
+    indicator.setAttribute('aria-label', `${{ base:'Чтение базы',registry:'Реестр',consumption:'Потребление',incoming:'Приём' }[name]}: ${scopedLabel}`);
   }
   $('#base-detail').textContent = baseText;
   $('#enterprise-detail').textContent = selectedFolder?.name || 'Не выбрано';
@@ -407,6 +426,9 @@ async function listFolder(path, legacy = false, signal = loads.signal) {
 }
 function renderFolders() {
   const list = $('#folder-list');
+  // This directory is internal in Sochi; the legacy chooser exists only in
+  // compatibility tests of the original multi-enterprise application.
+  if(!list)return;
   if (!folders.length && (sourceState === 'loading' || directoryState === 'loading')) {
     list.setAttribute('aria-busy', 'true');
     list.innerHTML = '<div class="enterprise-loading" role="status"><span class="loading-indicator" aria-hidden="true"></span><span>Загружаем предприятия…</span><div class="loading-bar" aria-hidden="true"></div></div>';
@@ -459,7 +481,7 @@ function renderResFolders() {
   if (resState === 'error' && !resFolders.length) {
     list.innerHTML = '<div class="enterprise-empty"><p>Не удалось загрузить список РЭС.</p><button type="button" class="secondary" data-open-settings>Проверить подключение</button></div>'; return;
   }
-  list.innerHTML = resFolders.length ? resFolders.map((f, i) => `<button type="button" class="choice-item ${selectedRes?.path === f.path ? 'selected' : ''}" data-res="${i}" aria-pressed="${selectedRes?.path === f.path}" ><span>${esc(f.name)}</span><i class="choice-dot" aria-hidden="true"></i></button>`).join('') : '<div class="enterprise-empty"><p>В этом предприятии пока нет папок РЭС.</p></div>';
+  list.innerHTML = resFolders.length ? resFolders.map((f, i) => `<button type="button" class="choice-item ${selectedRes?.path === f.path ? 'selected' : ''}" data-res="${i}" aria-pressed="${selectedRes?.path === f.path}" ><span>${esc(f.name)}</span><i class="choice-dot" aria-hidden="true"></i></button>`).join('') : '<div class="enterprise-empty"><p>Доступные РЭС пока не найдены. Проверьте соединение и права учётной записи.</p></div>';
 }
 async function refreshSources() {
   if (busy || folderRead) return;
@@ -472,7 +494,7 @@ async function refreshSources() {
   else if (selectedFolder || prefs.folder) {
     selectedFolder = null; resFolders = []; resState = 'idle'; clearResSelection();
     prefs = { root: rootUrl() }; savePrefs(); updateSource(); renderIndicators();
-    message('#settings-message', 'Выбранное предприятие больше не найдено. Выберите другое на главном экране.');
+    message('#settings-message', config.sochi ? 'Список РЭС больше недоступен. Проверьте подключение к базе.' : 'Выбранное предприятие больше не найдено. Выберите другое на главном экране.');
   }
 }
 async function selectFolder(i) {
@@ -572,7 +594,8 @@ async function openRes(res, { keepSettings = false, offlineCopy = null } = {}) {
     if (!loads.current(signal)) return;
     filesState = 'error'; filesError = error.message;
     diskState = 'disconnected'; consumptionState = 'error'; incomingState = 'error'; registryState = 'error';
-    setBusy(false); message('#settings-message', error.message); showSettings(); return;
+    setBusy(false); message('#settings-message', error.message);
+    if(!config.sochi||accountUI?.isAdmin)showSettings();return;
   }
   setBusy(false);
   if(config.sochi && !offlineCopy) {
@@ -582,7 +605,8 @@ async function openRes(res, { keepSettings = false, offlineCopy = null } = {}) {
   if (selectedFile) await downloadFile({ keepSettings, signal, offlineOnly:Boolean(offlineCopy) });
   else {
     registryState = 'missing'; renderIndicators();
-    message('#settings-message', 'Реестр не найден. Выберите файл вручную в разделе «Просмотр файлов».'); showSettings();
+    message('#settings-message', config.sochi ? 'Администратор ещё не загрузил реестр этого РЭС.' : 'Реестр не найден. Выберите файл вручную в разделе «Просмотр файлов».');
+    if(!config.sochi||accountUI?.isAdmin)showSettings();
   }
   if (loads.current(signal) && consumptionFile) await readConsumptionFile(signal, Boolean(offlineCopy), false);
   if (loads.current(signal) && incomingFile) await readIncomingFile(signal, Boolean(offlineCopy));
@@ -639,7 +663,8 @@ async function readSochiSummary({keepSettings=false,signal=loads.signal}={}){
   }catch(error){
     if(!loads.current(signal)||selectedRes!==current)return;
     registryState='error';registryError=error.message;summary=null;
-    setBusy(false);message('#settings-message',error.message);showSettings();
+    setBusy(false);message('#settings-message',error.message);
+    if(!config.sochi||accountUI?.isAdmin)showSettings();
   }
 }
 async function ensureSochiReportData(){
@@ -974,10 +999,11 @@ async function startDemo() {
   finally { if (loads.current(signal)) setBusy(false); }
 }
 function updateSource() {
-  $('#district-label').textContent = config.sochi ? 'Сочинское предприятие электрических сетей' : currentSource?.folder || selectedFolder?.name || 'Выберите предприятие';
-  $('#res-label').textContent = currentSource?.res || selectedRes?.name || (selectedFolder ? 'Выберите РЭС' : 'Сначала выберите предприятие');
+  const oldEnterpriseLabel=$('#district-label'),oldEnterprisePicker=$('#district-button');
+  if(oldEnterpriseLabel)oldEnterpriseLabel.textContent=currentSource?.folder||selectedFolder?.name||'Выберите предприятие';
+  $('#res-label').textContent = currentSource?.res || selectedRes?.name || (config.sochi ? 'Выберите РЭС' : selectedFolder ? 'Выберите РЭС' : 'Сначала выберите предприятие');
   $('#res-button').disabled = !selectedFolder;
-  $('#district-button').disabled=Boolean(config.sochi);
+  if(oldEnterprisePicker)oldEnterprisePicker.disabled=Boolean(config.sochi);
   $('#demo-banner').hidden = !isDemo; $('#example-queries').hidden = !isDemo;
   document.querySelectorAll('[name="field"]').forEach(input => {
     const available = !summary || input.value === 'address' || summary.sheets.some(s => s.layout.mapping[input.value] !== undefined);
@@ -997,10 +1023,10 @@ function renderResults() {
   $('#show-more').hidden = true; $('#results-count').textContent = ''; $('#results-title').textContent = submitted ? 'Найденные абоненты' : 'Результаты поиска';
   if (!summary && busy) { $('#results').innerHTML = emptyState('Загружаем реестр', busyText || 'Подготавливаем поиск…', 'file'); return; }
   if (!summary) {
-    const target = pending || selectedRes ? 'settings' : selectedFolder ? 'res' : 'enterprises';
-    const title = pending ? 'Проверьте столбцы реестра' : selectedRes ? 'Реестр не подключён' : selectedFolder ? 'Выберите РЭС' : 'Выберите предприятие';
-    const text = pending ? 'Подтвердите номера ПУ и лицевых счетов в настройках.' : selectedRes ? 'Проверьте файлы выбранной РЭС в настройках.' : selectedFolder ? 'Выберите район электрических сетей. Файлы загрузятся из его папки.' : 'Выберите предприятие, затем РЭС. Реестр загрузится автоматически.';
-    $('#results').innerHTML = emptyState(title, text, 'folder', `<button class="secondary" data-open-${target}>${target === 'settings' ? 'Открыть настройки' : target === 'res' ? 'Выбрать РЭС' : 'Выбрать предприятие'}</button>` + (pending || config.sochi ? '' : '<button class="text-button" id="start-demo">Посмотреть пример</button>'));
+    const target = config.sochi ? 'res' : pending || selectedRes ? 'settings' : selectedFolder ? 'res' : 'enterprises';
+    const title = config.sochi ? selectedRes ? 'Реестр не подключён' : 'Выберите РЭС' : pending ? 'Проверьте столбцы реестра' : selectedRes ? 'Реестр не подключён' : selectedFolder ? 'Выберите РЭС' : 'Выберите предприятие';
+    const text = config.sochi ? selectedRes ? 'Для выбранного РЭС нет готового реестра. Попросите администратора проверить загрузку Excel.' : 'Выберите нужный район в шапке. Данные загрузятся из базы автоматически.' : pending ? 'Подтвердите номера ПУ и лицевых счетов в настройках.' : selectedRes ? 'Проверьте файлы выбранной РЭС в настройках.' : selectedFolder ? 'Выберите район электрических сетей. Файлы загрузятся из его папки.' : 'Выберите предприятие, затем РЭС. Реестр загрузится автоматически.';
+    $('#results').innerHTML = emptyState(title, text, 'folder', `<button class="secondary" data-open-${target}>${config.sochi ? selectedRes ? 'Другой РЭС' : 'Выбрать РЭС' : target === 'settings' ? 'Открыть настройки' : target === 'res' ? 'Выбрать РЭС' : 'Выбрать предприятие'}</button>` + (pending || config.sochi ? '' : '<button class="text-button" id="start-demo">Посмотреть пример</button>'));
     return;
   }
   if (!submitted) { $('#results').innerHTML = emptyState('Можно искать', `В реестре ${recordsText(summary.count)}. Введите номер ПУ, лицевой счёт или адрес.`, 'search'); return; }
@@ -1272,7 +1298,9 @@ function applyReading(box) {
 document.addEventListener('click',e=>{const button=e.target.closest('[data-reading-action]');if(button)applyReading(button.closest('.reading-calculator'));});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.closest('.reading-calculator')){e.preventDefault();applyReading(e.target.closest('.reading-calculator'));}});
 $('#staff-logout').addEventListener('click',()=>$('#account-logout').click());
-$('#settings-open').addEventListener('click', showSettings); $('#district-button').addEventListener('click', showEnterprises); $('#res-button').addEventListener('click', showRes);
+$('#settings-open').addEventListener('click', showSettings);
+$('#district-button')?.addEventListener('click', showEnterprises);
+$('#res-button').addEventListener('click', showRes);
 $('#admin-upload-open').addEventListener('click',()=>{
   if(!config.sochi||!['admin','superadmin'].includes(accountUI?.user?.role))return;
   showSettings();

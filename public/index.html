@@ -8,10 +8,10 @@
   <title>Сочинские ЭС · Реестр абонентов</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css">
-  <link rel="stylesheet" href="./styles.css?v=25">
+  <link rel="stylesheet" href="./styles.css?v=26">
   <link rel="stylesheet" href="./journal-ui.css?v=23">
   <script src="./config.js"></script>
-  <script type="module" src="./app.js?v=25"></script>
+  <script type="module" src="./app.js?v=26"></script>
 </head>
 <body>
   <svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -42,8 +42,11 @@
   </svg>
   <header class="topbar">
     <div class="header-inner">
-      <a class="brand" href="./" aria-label="РОССЕТИ — Кубаньэнерго, главная"><img class="brand-logo" src="./rosseti-logo.svg" alt="РОССЕТИ" width="280" height="88"><span class="brand-caption">КУБАНЬЭНЕРГО</span></a>
-      <div class="header-actions"><button type="button" class="notification-button" id="notes-open" aria-label="Примечания: сначала загрузите реестр" aria-haspopup="dialog" disabled><svg aria-hidden="true"><use href="#i-bell"/></svg><span class="notification-badge" id="notes-badge" aria-hidden="true" hidden></span></button>
+      <a class="brand" href="./" aria-label="РОССЕТИ — Кубаньэнерго, Сочинский ПЭС, главная"><img class="brand-logo" src="./rosseti-logo.svg" alt="РОССЕТИ" width="280" height="88"><span class="brand-caption">КУБАНЬЭНЕРГО</span></a>
+      <div class="header-unit"><span>ЭЛЕКТРИЧЕСКИЕ СЕТИ</span><strong>Сочинский ПЭС</strong></div>
+      <div class="header-actions">
+      <button type="button" id="res-button" class="header-res-button" aria-label="Выбрать район электрических сетей" aria-haspopup="dialog" aria-controls="res-dialog" disabled><svg aria-hidden="true"><use href="#i-bolt"/></svg><span class="header-res-copy"><small>РАЙОН ЭЛЕКТРИЧЕСКИХ СЕТЕЙ</small><strong id="res-label">Выберите РЭС</strong></span><svg class="header-res-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button>
+      <button type="button" class="notification-button" id="notes-open" aria-label="Примечания: сначала загрузите реестр" aria-haspopup="dialog" disabled><svg aria-hidden="true"><use href="#i-bell"/></svg><span class="notification-badge" id="notes-badge" aria-hidden="true" hidden></span></button>
       <button type="button" class="settings-button" id="admin-upload-open" hidden aria-label="Открыть загрузку Excel"><svg aria-hidden="true"><use href="#i-file"/></svg><span>Загрузить Excel</span></button><button type="button" class="settings-button staff-signout" id="staff-logout" hidden aria-label="Выйти из учётной записи"><svg aria-hidden="true"><use href="#i-back"/></svg><span>Выйти</span></button><button class="settings-button" id="settings-open" aria-label="Панель управления"><svg><use href="#i-settings"/></svg><span>Настройки</span></button></div>
     </div>
     <div class="source-indicators" aria-label="Состояние данных">
@@ -58,21 +61,31 @@
     </div>
   </header>
   <main class="workspace">
-    <h1 class="sr-only">Абоненты</h1>
-    <div class="enterprise-toolbar"><button id="district-button" class="district-button" aria-haspopup="dialog" aria-controls="enterprise-dialog"><span class="enterprise-button-copy"><span class="enterprise-caption">Предприятие электрических сетей</span><span id="district-label">Сочинское предприятие электрических сетей</span></span><svg class="small-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button><button id="res-button" class="district-button res-button" aria-haspopup="dialog" aria-controls="res-dialog" disabled><span class="enterprise-button-copy"><span class="enterprise-caption">Район электрических сетей · РЭС</span><span id="res-label">Выберите РЭС</span></span><svg class="small-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></button></div>
+    <h1 class="sr-only">Поиск абонентов и анализ трансформаторных подстанций Сочинского ПЭС</h1>
     <p id="offline-readiness" class="offline-readiness" role="status" hidden></p>
     <div class="work-grid">
       <section class="search-column" aria-label="Поиск">
         <form id="search-form" class="search-panel">
           <fieldset class="search-types"><legend class="sr-only">Искать по</legend><label><input type="radio" name="field" value="meter" checked><span>Номер ПУ</span></label><label><input type="radio" name="field" value="account"><span>Лицевой счёт</span></label><label><input type="radio" name="field" value="address"><span>Адрес</span></label></fieldset>
+          <div class="search-panel-title"><span>ПОИСК В РЕЕСТРЕ АБОНЕНТОВ</span><h2>Найти потребителя</h2><p>Номер прибора, лицевой счёт или адрес в выбранном РЭС</p></div>
           <label class="input-label" for="search-input" id="search-label">Номер прибора учёта</label>
-          <div class="search-input-wrap"><svg><use href="#i-search"/></svg><input id="search-input" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Введите номер счётчика" maxlength="200"><button type="button" class="clear-input" id="clear-query" aria-label="Очистить поиск" hidden><svg><use href="#i-close"/></svg></button></div>
+          <div class="search-inline"><div class="search-input-wrap"><input id="search-input" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Введите номер счётчика" maxlength="200"><button type="button" class="clear-input" id="clear-query" aria-label="Очистить поиск" hidden><svg><use href="#i-close"/></svg></button></div><button class="primary search-submit" type="submit" id="search-submit" aria-label="Найти абонента" title="Найти абонента"><svg aria-hidden="true"><use href="#i-search"/></svg><span class="sr-only">Найти</span></button></div>
           <p class="search-match-hint" id="match-hint">Можно ввести номер целиком или его часть</p>
-          <button class="primary search-submit" type="submit" id="search-submit"><svg><use href="#i-search"/></svg>Найти</button>
-          <button class="secondary tp-open" type="button" id="tp-open" aria-haspopup="dialog" aria-controls="tp-dialog"><svg><use href="#i-bolt"/></svg>Реестр ТП</button>
-          <button class="secondary contour-button" id="contour-open" type="button" disabled aria-haspopup="dialog" aria-controls="analysis-picker-dialog"><svg aria-hidden="true"><use href="#i-chart"/></svg><span>Анализ контура ТП</span></button>
           <div id="form-message" class="form-message" role="status" hidden></div>
         </form>
+        <div class="tp-feature-list" aria-label="Операции с трансформаторными подстанциями">
+          <section class="tp-feature-card tp-feature-registry" aria-labelledby="tp-feature-registry-title">
+            <div class="tp-feature-heading"><span class="tp-feature-icon"><svg aria-hidden="true"><use href="#i-bolt"/></svg></span><div><span class="tp-feature-eyebrow">ОТДЕЛЬНЫЙ РАЗДЕЛ</span><h2 id="tp-feature-registry-title">Реестр ТП</h2></div></div>
+            <p>Список трансформаторных подстанций, приборы учёта и абоненты каждой ТП.</p>
+            <button class="tp-feature-action" type="button" id="tp-open" aria-haspopup="dialog" aria-controls="tp-dialog"><span>Открыть реестр ТП</span><svg aria-hidden="true"><use href="#i-chevron"/></svg></button>
+          </section>
+          <section class="tp-feature-card tp-feature-analysis" aria-labelledby="tp-feature-analysis-title">
+            <div class="tp-feature-heading"><span class="tp-feature-icon"><svg aria-hidden="true"><use href="#i-chart"/></svg></span><div><span class="tp-feature-eyebrow">АНАЛИТИКА ПО ТП</span><h2 id="tp-feature-analysis-title">Анализ контура ТП</h2></div></div>
+            <p>Помесячный расход и показатели контура всей ТП, а не отдельного абонента.</p>
+            <button class="tp-feature-action" id="contour-open" type="button" disabled aria-haspopup="dialog" aria-controls="analysis-picker-dialog"><span>Перейти к анализу ТП</span><svg aria-hidden="true"><use href="#i-chevron"/></svg></button>
+            <p class="tp-feature-requirement">Для анализа нужен файл ПО выбранного РЭС</p>
+          </section>
+        </div>
         <div id="demo-banner" class="demo-banner" hidden><span>Демонстрация · вымышленные данные</span><button id="demo-exit" type="button">Выйти</button></div>
         <div id="example-queries" class="example-queries" hidden><span>Попробуйте</span><button data-query="00123456" data-field="meter">ПУ 00123456</button><button data-query="00000001001" data-field="account">ЛС 00000001001</button></div>
         <div class="desktop-footnote"><svg><use href="#i-bolt"/></svg><p>Вся строка реестра —<br>в одной карточке</p></div>
@@ -88,12 +101,8 @@
     <div class="login-heading"><span class="eyebrow">РАБОЧАЯ ОБЛАСТЬ</span><h2 id="login-title">Вход в систему</h2><p class="hint">Используйте учётную запись, выданную администратором.</p></div>
     <form id="login-form" class="account-form"><label>Логин<input id="login-login" name="username" autocomplete="username" required maxlength="64" autocapitalize="none" spellcheck="false"></label><label>Пароль<input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="128"></label><p id="login-message" class="form-message" role="status" hidden></p><button id="login-submit" type="submit" class="primary full-width">Войти</button></form>
   </dialog>
-  <dialog id="enterprise-dialog" class="enterprise-dialog full-screen-dialog" aria-labelledby="enterprise-title">
-    <div class="dialog-header"><h2 id="enterprise-title">Предприятие электрических сетей</h2><button class="icon-button close-dialog" aria-label="Закрыть выбор предприятия"><svg><use href="#i-close"/></svg></button></div>
-    <div class="dialog-body enterprise-body"><button type="button" class="secondary selection-stop" data-stop-loading hidden><svg aria-hidden="true"><use href="#i-stop"/></svg>Остановить загрузку</button><div id="folder-list" class="choice-list" aria-live="polite"></div></div>
-  </dialog>
   <dialog id="res-dialog" class="enterprise-dialog full-screen-dialog" aria-labelledby="res-title">
-    <div class="dialog-header"><div><h2 id="res-title">Район электрических сетей</h2><p class="registry-meta" id="res-enterprise"></p></div><button class="icon-button close-dialog" aria-label="Закрыть выбор РЭС"><svg><use href="#i-close"/></svg></button></div>
+    <div class="dialog-header"><div><h2 id="res-title">Выберите РЭС</h2><p class="registry-meta" id="res-enterprise">Сочинский ПЭС</p></div><button class="icon-button close-dialog" aria-label="Закрыть выбор РЭС"><svg><use href="#i-close"/></svg></button></div>
     <div class="dialog-body enterprise-body"><div class="selection-actions"><button type="button" class="secondary selection-stop" data-stop-loading hidden><svg aria-hidden="true"><use href="#i-stop"/></svg>Остановить</button></div><div id="res-list" class="choice-list" aria-live="polite"></div></div>
   </dialog>
   <dialog id="offline-dialog" class="enterprise-dialog full-screen-dialog" aria-labelledby="offline-title">
