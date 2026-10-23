@@ -1247,6 +1247,12 @@ function applyReading(box) {
 document.addEventListener('click',e=>{const button=e.target.closest('[data-reading-action]');if(button)applyReading(button.closest('.reading-calculator'));});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.closest('.reading-calculator')){e.preventDefault();applyReading(e.target.closest('.reading-calculator'));}});
 $('#settings-open').addEventListener('click', showSettings); $('#district-button').addEventListener('click', showEnterprises); $('#res-button').addEventListener('click', showRes);
+$('#admin-upload-open').addEventListener('click',()=>{
+  if(!config.sochi||!['admin','superadmin'].includes(accountUI?.user?.role))return;
+  showSettings();
+  analysisUI.settingsTab('admin');
+  $('#admin-upload-section').scrollIntoView({block:'start',behavior:'smooth'});
+});
 $('#offline-open').addEventListener('click', showOfflineCopies);
 $('#anomaly-export').addEventListener('click', exportAnomalies);
 $('#report-parts').addEventListener('click', event => {
@@ -1263,7 +1269,6 @@ document.addEventListener('click', e => {
   if (indicator?.dataset.state === 'off') { diagnosticsUI.open(indicator.id === 'base-indicator' ? 'base' : 'registry'); return; }
   if (e.target.closest('[data-stop-loading]')) stopLoading();
   if (e.target.closest('[data-open-settings]')) showSettings();
-  if (e.target.closest('[data-open-enterprises]')) showEnterprises();
   if (e.target.closest('[data-open-res]')) showRes();
 });
 document.querySelectorAll('.close-dialog').forEach(button => button.addEventListener('click', () => dialogControls.get(button.closest('dialog').id).dismiss()));

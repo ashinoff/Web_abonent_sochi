@@ -77,6 +77,8 @@ test('Sochi browser sees one enterprise, scoped RES, server search and no automa
   await import('../public/app.js?sochi-ui-test');
   await until(()=>$('#res-list').querySelectorAll('[data-res]').length===1,'automatic Sochi enterprise');
   assert.equal($('#district-button').disabled,true);
+  assert.equal(page.document.querySelector('[data-open-enterprises]'),null,'the obsolete other enterprise button must be removed');
+  assert.equal($('#admin-upload-open').hidden,true,'regular employee must not see administrator upload shortcut');
   assert.equal($('#district-label').textContent,'Сочинское предприятие электрических сетей');
   assert.equal($('#res-list').querySelectorAll('[data-res]').length,1);
   $('#res-button').click();

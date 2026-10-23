@@ -498,3 +498,13 @@ dialog.has-swipe-underlay::backdrop{background:#0e253868;backdrop-filter:blur(3p
 #admin-upload-message { overflow-wrap:anywhere; }
 #source-files[data-readonly=true] .manual-source,#source-files[data-readonly=true] .choose-source { display:none !important; }
 .enterprise-toolbar #district-button:disabled { opacity:1; cursor:default; }
+
+/* Sochi admin actions: quickly reach Excel import and see the selected RES's current package. */
+.header-actions #admin-upload-open{margin-left:0;background:#2d5776;border-color:#54748f}
+.header-actions #admin-upload-open:hover{background:#376782}
+#admin-upload-section{scroll-margin-top:16px}
+#admin-upload-section .admin-section-heading h3{margin-bottom:0}
+#admin-upload-current{background:#f4f8fc;padding:10px 12px;border-radius:8px;border:1px solid #dce5ef;margin:0}
+#admin-upload-submit{width:100%}
+.sochi-scope-actions{margin-bottom:12px}
+.sochi-scope-actions .secondary{min-height:36px;font-size:12px;padding:6px 12px}
