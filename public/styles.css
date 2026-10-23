@@ -705,3 +705,120 @@ dialog.has-swipe-underlay::backdrop{background:#0e253868;backdrop-filter:blur(3p
   .header-actions .settings-button{width:40px}
   .source-indicators .source-indicator{width:42px}
 }
+
+/* Сочинский ПЭС: единый размер шапочных кнопок при любых ширинах экрана.
+   РЭС является единственной широкой кнопкой, остальные только SVG-иконки. */
+.header-actions{
+  --header-control-size:50px;
+  gap:10px;
+  align-items:center;
+}
+.header-actions .header-res-button{
+  width:clamp(190px,23vw,288px);
+  min-width:0;
+  max-width:288px;
+  flex:0 1 288px;
+  height:var(--header-control-size);
+  min-height:var(--header-control-size);
+  padding:0 15px 0 18px;
+  background:#285b8d;
+  border:1px solid #648cb6;
+  border-radius:12px;
+  color:#fff;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:16px;
+  box-shadow:0 3px 12px #0c203527;
+}
+.header-actions .header-res-button:hover:not(:disabled){
+  background:#336ca3;
+  border-color:#9dc3ea;
+}
+.header-actions .header-res-button #res-label{
+  display:block;
+  min-width:0;
+  flex:1;
+  font-family:inherit;
+  font-weight:700;
+  font-size:18px;
+  letter-spacing:-.35px;
+  line-height:1.2;
+  color:#fff;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.header-actions .header-res-button .header-res-chevron{
+  flex:0 0 16px;
+  width:16px;
+  height:16px;
+  color:#e0ecfa;
+}
+.header-actions .header-icon-button,
+.header-actions #admin-upload-open,
+.header-actions #settings-open,
+.header-actions #notes-open,
+.header-actions #staff-logout{
+  display:grid;
+  place-items:center;
+  flex:0 0 var(--header-control-size);
+  width:var(--header-control-size);
+  min-width:var(--header-control-size);
+  max-width:var(--header-control-size);
+  height:var(--header-control-size);
+  min-height:var(--header-control-size);
+  margin:0;
+  padding:0;
+  border-radius:12px;
+  border:1px solid #56738f;
+  background:#254160;
+  color:#fff;
+}
+.header-actions .header-icon-button:hover:not(:disabled),
+.header-actions #admin-upload-open:hover:not(:disabled),
+.header-actions #settings-open:hover:not(:disabled),
+.header-actions #notes-open:hover:not(:disabled){
+  background:#365779;
+  border-color:#88a9c9;
+}
+.header-actions .header-icon-button > svg,
+.header-actions #admin-upload-open > svg,
+.header-actions #settings-open > svg,
+.header-actions #notes-open > svg{
+  display:block;
+  width:22px;
+  height:22px;
+  color:#f3f8ff;
+}
+.header-actions .notification-button:disabled{opacity:.46;cursor:default}
+.header-actions .notification-badge{position:absolute}
+@media(max-width:850px){
+  .header-actions{
+    --header-control-size:48px;
+    gap:8px;
+  }
+  .header-actions .header-res-button{
+    width:auto;
+    max-width:none;
+    flex:1 1 auto;
+  }
+}
+@media(max-width:700px){
+  .header-actions{--header-control-size:45px;gap:7px}
+  .header-actions .header-res-button{
+    height:var(--header-control-size);
+    min-height:var(--header-control-size);
+    padding:0 10px 0 12px;
+    gap:8px;
+  }
+  .header-actions .header-res-button #res-label{font-size:15px;letter-spacing:-.2px}
+  .header-actions .header-icon-button > svg,
+  .header-actions #admin-upload-open > svg,
+  .header-actions #settings-open > svg,
+  .header-actions #notes-open > svg{width:21px;height:21px}
+}
+@media(max-width:380px){
+  .header-actions{--header-control-size:42px;gap:6px}
+  .header-actions .header-res-button #res-label{font-size:14px}
+}
