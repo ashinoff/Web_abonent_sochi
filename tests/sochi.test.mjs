@@ -253,6 +253,48 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
       headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
       body:XLSX.write(monthlyBook,{type:'buffer',bookType:'xlsx'})});
     assert.equal(monthlySaved.status,200,await monthlySaved.text().catch(()=>'')); 
+    const beforeBalance=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[0],action:'analysisTP',tp:'ТП-1'},userCookie);
+    assert.equal(beforeBalance.status,200);
+    assert.equal((await beforeBalance.json()).result.balance.status,'no-tp',
+      'previously loaded intake references a different TP');
+
+    // Replace the intake with two input PUs on TP-1 and verify a live scoped
+    // balance after the intake revision invalidates the analysis cache.
+    const balanceBook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(balanceBook,XLSX.utils.aoa_to_sheet([
+      ['№ ПУ','ТП','Разрешенная мощность, кВт','Тип (юр/физ)',
+       'Напряжение, кВ (0,22 / 0,4; пусто = авто)','Абонент','Адрес','01.01.2026','01.02.2026'],
+      ['INPUT-1','ТП-1',null,null,null,'Ввод 1','',140,260],
+      ['INPUT-2','ТП-1',null,null,null,'Ввод 2','',60,40],
+      ['INPUT-3','ТП-2',null,null,null,'Ввод 3','',70,80],
+    ]),'Приём');
+    const replaced=await api(uploadUrl,{method:'POST',
+      headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
+      body:XLSX.write(balanceBook,{type:'buffer',bookType:'xlsx'})});
+    const changed=await replaced.json();
+    assert.equal(replaced.status,200,JSON.stringify(changed));
+    const tpAnalysis=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[0],
+      action:'analysisTP',tp:'ТП-1'},userCookie);
+    assert.equal(tpAnalysis.status,200);
+    const tpDetails=(await tpAnalysis.json()).result;
+    assert.equal(tpDetails.balance.status,'ready');
+    assert.equal(tpDetails.balance.intakeMeterCount,2);
+    assert.equal(tpDetails.balance.comparedMonths,2);
+    assert.deepEqual(tpDetails.balance.values,[200,300]);
+    assert.deepEqual(tpDetails.values,[100,200]);
+    assert.equal(tpDetails.balance.totalIntake,500);
+    assert.equal(tpDetails.balance.totalOutgoing,300);
+    assert.equal(tpDetails.balance.imbalance,200);
+    assert.equal(tpDetails.balance.pct,40);
+    assert.equal(tpDetails.balance.elevated,2);
+    const tpChoicesRes=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[0],action:'analysisTPs'},userCookie);
+    const tpChoices=(await tpChoicesRes.json()).result;
+    assert.equal(tpChoices.find(item=>item.name==='ТП-1').incoming,true);
+    assert.equal(tpChoices.find(item=>item.name==='ТП-2').incoming,true);
+    const remoteTP=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[1],
+      action:'analysisTP',tp:'ТП-1'},userCookie);
+    assert.equal(remoteTP.status,403,'TP balance is scoped to permitted RES');
+
     const analysisSummary=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[0],action:'analysisSummary'},userCookie);
     assert.equal(analysisSummary.status,200);
     assert.equal((await analysisSummary.json()).result.accountCount,2);
