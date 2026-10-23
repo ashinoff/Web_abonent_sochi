@@ -1,12 +1,12 @@
 {
-  "name": "web-abonent",
+  "name": "web-abonent-sochi",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Мобильный поиск по реестрам абонентов электросетей",
   "scripts": {
     "postinstall": "node scripts/patch-xlsx.mjs",
-    "start": "node server.mjs",
+    "start": "node sochi-server.mjs",
     "dev": "vite --host 0.0.0.0 --port 4173 --strictPort",
     "test": "node --test tests/*.test.mjs"
   },
