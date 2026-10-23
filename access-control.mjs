@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { SOCHI_RES_PATHS } from './public/sochi-config.js';
 import { fault,superAdminConfig,accountLogin,accountPassword,accountName,roles,publicAccount,verifyPassword,sessionHash } from './accounts.mjs';
 
 export async function readAdminJson(req){
@@ -58,7 +59,7 @@ export function createAccessControl({env,store,sendJson}){
   };
 }
 
-export function createAdminHandler({store,source,access,prepared,sendJson,state,refreshCatalog,cancelRes=path=>prepared?.cancelRes(path)}){
+export function createAdminHandler({store,source,access,prepared,sendJson,state,refreshCatalog,enforceSochiScope=false,cancelRes=path=>prepared?.cancelRes(path)}){
   let catalogJob=null;
   async function event(actor,code,message){await store.appendAdminEvent(source,{category:'accounts',code,message,actor:actor.login});}
   return async(req,res,url)=>{
@@ -70,12 +71,15 @@ export function createAdminHandler({store,source,access,prepared,sendJson,state,
     if(path==='/api/admin/accounts'&&req.method==='POST'||account&&['PATCH','DELETE'].includes(req.method)){
       const body=await readAdminJson(req);
       if(req.method==='DELETE'){onlyFields(body,[]);await store.deleteAccount(actor,account[1]);await event(actor,'account_deleted','Учётная запись удалена.');sendJson(res,200,{ok:true});return;}
-      onlyFields(body,['name','login','password','role','active']);const data={};
+      onlyFields(body,['name','login','password','role','active','resPaths']);const data={};
       if(body.name!==undefined||!account)data.name=accountName(body.name);
       if(body.login!==undefined||!account)data.login=accountLogin(body.login);
       if(body.password!==undefined&&body.password!=='')data.password=accountPassword(body.password);
       if(body.role!==undefined){if(!roles.has(body.role))throw fault('Неизвестная роль.');data.role=body.role;}
       if(body.active!==undefined){if(typeof body.active!=='boolean')throw fault('Некорректное состояние учётной записи.');data.active=body.active;}
+      if(body.resPaths!==undefined){if(!Array.isArray(body.resPaths)||body.resPaths.length>SOCHI_RES_PATHS.length||body.resPaths.some(path=>!SOCHI_RES_PATHS.includes(path)))throw fault('Неизвестный РЭС в зоне доступа.');data.resPaths=[...new Set(body.resPaths)];}
+      if(enforceSochiScope && !account && (body.role===undefined||body.role==='user') && !data.resPaths?.length)throw fault('Выберите хотя бы один РЭС для пользователя.');
+      if(enforceSochiScope && body.role==='user' && account && data.resPaths?.length===0)throw fault('Пользователю нужен хотя бы один РЭС.');
       const saved=await store.saveAccount(actor,account?.[1],data);await event(actor,account?'account_updated':'account_created','Учётная запись '+(account?'изменена.':'создана.'));
       sendJson(res,200,{account:publicAccount(saved)});return;
     }
