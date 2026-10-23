@@ -566,7 +566,8 @@ async function openRes(res, { keepSettings = false, offlineCopy = null } = {}) {
 let serverReportReady = '';
 async function registryRequest(action,payload={},transfer=[]){
   const serverActions=['summary','search','record','tps','tpMeters','notes','mapNotes','notificationRecord'];
-  if(config.sochi && navigator.onLine && !usingOfflineCopy && serverActions.includes(action)){
+  if(config.sochi && !usingOfflineCopy && serverActions.includes(action)){
+    if(!navigator.onLine)throw new Error('Нет подключения к серверу. Откройте офлайн-копию вашей РЭС.');
     if(!selectedRes)throw new Error('Выберите РЭС.');
     const response=await fetch(new URL('./api/registry',location.href),{
       method:'POST',credentials:'same-origin',cache:'no-store',
@@ -1182,8 +1183,12 @@ const diagnosticsUI = initDiagnosticsUI({ openDialog, showSettings, context: () 
 accountUI=initAccountUI({canRefresh:()=>!usingOfflineCopy,onChange:({enabled,user})=>{if(enabled&&!user){if(busy)stopLoading();loads.start();clearDataset();adminUI.reset();}renderIndicators();},onLogout:()=>{adminUI.reset();clearDataset();}});
 const adminUI=initAdminUI({account:()=>accountUI.user,onDatabaseChanged:()=>{if(busy)stopLoading();void loadMap.refresh();directoryState='idle';folderRead=null;}});
 async function sochiAnalysisRequest(action,payload={},transfer=[],onProgress=()=>{}){
-  if(config.sochi&&navigator.onLine&&!usingOfflineCopy&&action==='exportAnomalies')await ensureSochiReportData();
-  if(config.sochi && navigator.onLine && !usingOfflineCopy && ['analysisConsumer','analysisTP','analysisTPs','analysisSummary'].includes(action)){
+  if(config.sochi&&!usingOfflineCopy&&action==='exportAnomalies'){
+    if(!navigator.onLine)throw new Error('Нет подключения. Используйте скачанную копию РЭС.');
+    await ensureSochiReportData();
+  }
+  if(config.sochi && !usingOfflineCopy && ['analysisConsumer','analysisTP','analysisTPs','analysisSummary'].includes(action)){
+    if(!navigator.onLine)throw new Error('Нет подключения к серверу. Выберите офлайн-копию РЭС.');
     if(!selectedRes)throw new Error('Выберите РЭС.');
     const response=await fetch(new URL('./api/analysis',location.href),{
       method:'POST',credentials:'same-origin',cache:'no-store',
