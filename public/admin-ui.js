@@ -95,7 +95,9 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=null,xhrFa
     const open=new Set([...$('#admin-res-list').querySelectorAll('details[open]')].map(node=>node.dataset.enterprise));
     $('#admin-res-list').innerHTML=[...groups].map(([name,folders])=>`<details class="admin-enterprise" data-enterprise="${esc(name)}" ${query||open.has(name)?'open':''}><summary>${esc(name)}<small>${folders.length} РЭС</small></summary>${folders.map(folder=>{
       const errors=Object.entries(folder.statuses||{}).filter(([,state])=>state.state==='error'||state.state==='stale');
-      return `<article class="admin-res"><div><strong>${esc(folder.res_name)}</strong><span class="admin-policy" data-blocked="${Boolean(folder.load_blocked)}">${folder.load_blocked?'Загрузка закрыта':'Загрузка открыта'}</span></div><p class="hint">Пакетов: ${esc(folder.package_count??'—')} · ${esc(formatBytes(Number(folder.payload_bytes||0)))} · Проверено: ${esc(dates(folder.checked_at))}</p>${errors.map(([role,item])=>`<p class="admin-error">${esc({registry:'Реестр',consumption:'ПО',incoming:'Приём',instant:'Журнал 31',events:'Журнал 46'}[role] || role)}: ${esc(item.message||'Ошибка подготовки. Проверьте файл и соединение.')}</p>`).join('')}<div class="admin-row-actions"><button type="button" class="secondary" data-res-policy="${esc(folder.res_path)}" data-blocked="${Boolean(folder.local_blocked)}" ${database.globalBlocked?'disabled':''}>${folder.local_blocked?'Разрешить загрузку':'Закрыть загрузку'}</button><button type="button" class="secondary admin-danger" data-res-clear="${esc(folder.res_path)}">Очистить данные РЭС</button></div></article>`;
+      const warnings=Object.entries(folder.statuses||{}).flatMap(([role,state])=>
+        (state.warnings||[]).map(note=>({role,note})));
+      return `<article class="admin-res"><div><strong>${esc(folder.res_name)}</strong><span class="admin-policy" data-blocked="${Boolean(folder.load_blocked)}">${folder.load_blocked?'Загрузка закрыта':'Загрузка открыта'}</span></div><p class="hint">Пакетов: ${esc(folder.package_count??'—')} · ${esc(formatBytes(Number(folder.payload_bytes||0)))} · Проверено: ${esc(dates(folder.checked_at))}</p>${warnings.map(({role,note})=>`<p class="admin-error" data-kind="warning">${esc(SOCHI_ROLES[role]||role)}: ${esc(note)}</p>`).join('')}${errors.map(([role,item])=>`<p class="admin-error">${esc({registry:'Реестр',consumption:'ПО',incoming:'Приём',instant:'Журнал 31',events:'Журнал 46'}[role] || role)}: ${esc(item.message||'Ошибка подготовки. Проверьте файл и соединение.')}</p>`).join('')}<div class="admin-row-actions"><button type="button" class="secondary" data-res-policy="${esc(folder.res_path)}" data-blocked="${Boolean(folder.local_blocked)}" ${database.globalBlocked?'disabled':''}>${folder.local_blocked?'Разрешить загрузку':'Закрыть загрузку'}</button><button type="button" class="secondary admin-danger" data-res-clear="${esc(folder.res_path)}">Очистить данные РЭС</button></div></article>`;
     }).join('')}</details>`).join('')||'<p class="hint">РЭС не найдены. Обновите карту папок.</p>';
     renderUploadCurrent();
     $('#admin-events').innerHTML=database.events.map(event=>`<article class="admin-event"><strong>${esc(event.message)}</strong><span>${esc(event.res_path==='/'?'Все РЭС':event.res_path||'')}${event.actor?' · '+esc(event.actor):''}</span><small>${esc(dates(event.created_at))} · ${esc(event.code)}</small></article>`).join('')||'<p class="hint">Ошибок и событий пока нет.</p>';
@@ -203,7 +205,7 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=null,xhrFa
       url.searchParams.set('resPath',resPath);
       url.searchParams.set('role',role);
       url.searchParams.set('filename',file.name);
-      await transferSochiExcel(url,file,{
+      const result=await transferSochiExcel(url,file,{
         fetcher, ...(xhrFactory?{xhrFactory}:{}),
         onProgress(loaded,total){
           progressState('sending','Передаём файл на сервер…',Math.min(100,Math.round(loaded/total*100)));
@@ -213,9 +215,11 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=null,xhrFa
           status('#admin-upload-message','Файл принят на обработку. Это может занять несколько минут.',true);
         },
       });
-      progressState('done','Обработка завершена, данные сохранены.',100);
+      const warnings=result.warnings||[];
+      progressState('done',warnings.length?'Файл загружен с замечаниями по данным.':'Обработка завершена, данные сохранены.',100);
       const resName=SOCHI_RES_NAMES[SOCHI_RES_PATHS.indexOf(resPath)];
-      status('#admin-upload-message','Готово: '+file.name+'. Обновлён источник «'+SOCHI_ROLES[role]+'» для '+resName+'.');
+      status('#admin-upload-message','Готово: '+file.name+'. Обновлён источник «'+SOCHI_ROLES[role]+'» для '+resName+'.'+
+        (warnings.length?' Замечания к исходным номерам: '+warnings.join(' '):''));
       fileInput.value='';
       onDatabaseChanged();
       await refresh();

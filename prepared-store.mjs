@@ -128,7 +128,7 @@ export function createPreparedStore(env = process.env,{pool:providedPool}={}) {
       await ready();
       await pool.query('DELETE FROM abonent_folder_status WHERE source=$1 AND NOT (res_path = ANY($2::text[]))', [source, paths]);
     },
-    async saveSochiUpload(source, {resPath,role,path,filename,size,revision,json,actor}) {
+    async saveSochiUpload(source, {resPath,role,path,filename,size,revision,json,actor,warnings=[]}) {
       await ready();
       if(source!==SOCHI_SOURCE||!SOCHI_RES_PATHS.includes(resPath)||!path.startsWith(resPath+'/'))throw new Error('Некорректный РЭС.');
       const stamp=new Date().toISOString();
@@ -137,7 +137,8 @@ export function createPreparedStore(env = process.env,{pool:providedPool}={}) {
         // A replacement is atomic: a failed conversion cannot remove the last good version.
         await client.query("DELETE FROM abonent_snapshots WHERE source=$1 AND role=$2 AND left(path,length($3)+1)=$3||'/'",[source,role,resPath]);
         await client.query("INSERT INTO abonent_snapshots (source,path,role,revision,data,payload_json) VALUES ($1,$2,$3,$4,'null'::jsonb,$5::json)",[source,path,role,revision,json]);
-        const status={state:'ready',file:filename,path,size,modified:stamp,updatedAt:stamp};
+        const status={state:'ready',file:filename,path,size,modified:stamp,updatedAt:stamp,
+          ...(warnings.length?{warnings:warnings.slice(0,20)}:{})};
         const changed=await client.query("UPDATE abonent_folder_status SET statuses=jsonb_set(statuses,ARRAY[$3],$4::jsonb,true),checked_at=now() WHERE source=$1 AND res_path=$2",
           [source,resPath,role,JSON.stringify(status)]);
         if(!changed.rowCount)throw new Error('РЭС отсутствует в базе.');

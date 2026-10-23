@@ -89,11 +89,11 @@ export function createSochiServer(options={}) {
     const path=canonicalSochiPath(resPath,role,extension);
     const status=await store.saveSochiUpload(SOCHI_SOURCE,{
       resPath,role,path,filename,size:received.size,revision:received.revision,
-      json:received.json,actor:actor.login,
+      json:received.json,actor:actor.login,warnings:received.warnings,
     });
     registry.invalidate(resPath);
     analytics.invalidate(resPath);
-    return {ok:true,role,resPath,status};
+    return {ok:true,role,resPath,status,warnings:received.warnings||[]};
   }
   // Only the memory-intensive workbook preparation + DB swap are serialized;
   // small authenticated chunks may arrive while an unrelated file is parsed.

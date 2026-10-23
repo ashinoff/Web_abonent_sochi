@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdtemp, open, rm } from 'node:fs/promises';
+import { mkdtemp, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'node:stream';
@@ -28,8 +28,26 @@ export async function prepareSochiWorkbookFile(path,output,{role,filename,size,h
   try { await handle.read(signature,0,8,0); } finally { await handle.close(); }
   if (!signature.subarray(0,4).equals(zipHeader) && !signature.equals(xlsHeader))
     throw fault('Формат файла не похож на XLS или XLSX.',400,'invalid_file');
-  const json = await prepareUploadedXlsx(path,output,role,filename);
-  return { size, revision: role + ':sochi-v1:' + hash, json };
+  let json;
+  try {json=await prepareUploadedXlsx(path,output,role,filename);}
+  catch(error){
+    const detail=String(error.message||'').slice(0,1700).trim();
+    // The child parser writes only its message to stderr, not a stack trace.
+    // Expose known workbook/infrastructure limits to authenticated admins,
+    // without returning raw SQL errors or internal filesystem paths.
+    if(/^(?:Проверка ключевых идентификаторов|Строка \d+:|Не найдена шапка|Сопоставьте столбцы|Реестр слишком большой|Некорректный XLSX|В файле нет|Нет строк|Длинный номер|Excel мог округлить|Лист «)/i.test(detail))
+      throw fault(detail,422,'invalid_workbook');
+    if(/^(?:Недостаточно памяти|Файл превышает доступный лимит памяти|Подготовка Excel превысила|Подготовленный пакет Excel превышает лимит)/i.test(detail))
+      throw fault(detail,503,'workbook_limit');
+    throw error;
+  }
+  let warnings=[];
+  try {
+    const raw=await readFile(output+'.warnings.json','utf8');
+    const notes=JSON.parse(raw);
+    if(Array.isArray(notes))warnings=notes.filter(x=>typeof x==='string').slice(0,20);
+  }catch(error){if(error.code!=='ENOENT')throw error;}
+  return { size, revision: role + ':sochi-v1:' + hash, json, warnings };
 }
 
 // Keep raw personal data in a temporary file only while a single administrator
