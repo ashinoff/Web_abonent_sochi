@@ -86,6 +86,35 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
       'employee must not upload even a valid workbook');
     const uploaded=await api(uploadUrl,{method:'POST',headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:bytes});
     assert.equal(uploaded.status,200,await uploaded.text().catch(()=>'')); 
+
+    // New monthly intake: keep all 69 dates and their null/zero distinction.
+    // Original one-shot and chunked uploads use the same parser/DB pipeline.
+    const intakeHeader=['№ ПУ','ТП','Разрешенная мощность, кВт','Тип (юр/физ)',
+      'Напряжение, кВ (0,22 / 0,4; пусто = авто)','Абонент','Адрес',
+      ...Array.from({length:69},(_,i)=>'01.'+String(i%12+1).padStart(2,'0')+'.'+(2021+Math.floor(i/12)))];
+    const intakeValues=Array(69).fill(null);
+    intakeValues[0]=61524;intakeValues[1]='63 696';intakeValues[20]=0;intakeValues[62]=422414;
+    const intakeRow=['12289174707473','КН-5-1000',null,null,null,
+      'ввод 1 - КН-5-1000 ПУ № 12289174707473',null,...intakeValues];
+    const intakeBook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(intakeBook,XLSX.utils.aoa_to_sheet([intakeHeader,intakeRow]),'Приём');
+    const intakeUploaded=await api(uploadUrl,{method:'POST',
+      headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
+      body:XLSX.write(intakeBook,{type:'buffer',bookType:'xlsx'})});
+    const intakeResponse=await intakeUploaded.json();
+    assert.equal(intakeUploaded.status,200,JSON.stringify(intakeResponse));
+    const intakePath=canonicalSochiPath(SOCHI_RES_PATHS[0],'incoming');
+    const intakeSaved=await server.preparedStore.getJson(SOCHI_SOURCE,intakePath,'incoming');
+    const intakePack=JSON.parse(intakeSaved.json);
+    assert.equal(intakePack.schema,'meter-monthly-v1');
+    assert.equal(intakePack.months.length,69);
+    assert.equal(intakePack.rows.length,1);
+    assert.equal(intakePack.rows[0][0],'12289174707473');
+    assert.equal(intakePack.rows[0][7][0],61524);
+    assert.equal(intakePack.rows[0][7][1],63696);
+    assert.equal(intakePack.rows[0][7][20],0);
+    assert.equal(intakePack.rows[0][7][62],422414);
+    assert.equal(intakePack.rows[0][7][68],null);
     const invalidImport=await api(uploadUrl,{method:'POST',
       headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
       body:Buffer.from('not an xlsx workbook')});

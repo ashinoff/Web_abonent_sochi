@@ -9,6 +9,7 @@ import { prepareWorkbook } from '../prepared-workbook.mjs';
 import { writeRegistryXLSX } from '../registry-stream.mjs';
 import { readFile } from 'node:fs/promises';
 import { readEventJournalXLSX } from '../journal-stream.mjs';
+import { writeIncomingXLSX } from '../incoming-stream.mjs';
 import { SOCHI_ROLES } from '../public/sochi-config.js';
 
 test('All five XLSX templates match the real Sochi import parsers', async t => {
@@ -38,7 +39,17 @@ test('All five XLSX templates match the real Sochi import parsers', async t => {
       } else if (role==='consumption') {
         assert.ok(data.rows?.length || data.packs?.length || data.blocks?.length || JSON.stringify(data).includes('00000001001'));
       } else if (role==='incoming') {
-        assert.equal(data.sheets,1);
+        assert.equal(data.schema,'meter-monthly-v1');
+        assert.equal(data.rows.length,1);
+        assert.equal(data.months.length,69);
+        assert.equal(data.rows[0][0],'000012345678');
+        assert.equal(data.rows[0][7][0],1200);
+        assert.equal(data.rows[0][7][68],1450);
+        const source=join(folder,'incoming.xlsx'),output=join(folder,'incoming.json');
+        await writeFile(source,buffer);
+        const streamed=await writeIncomingXLSX(source,output);
+        assert.equal(streamed.rows,1);
+        assert.deepEqual(JSON.parse(await readFile(output,'utf8')),data);
       } else if (role==='instant') {
         assert.equal(data.stats.accepted,1);
         assert.equal(data.stats.meters,1);
