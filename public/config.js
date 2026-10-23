@@ -1,10 +1,2 @@
-// Для GitHub Pages укажите здесь публичную папку Яндекс Диска.
-// На Амвере источник берётся исключительно из переменной YANDEX_PUBLIC_URL.
-// Публичная ссылка не является секретом. Реестры не добавляйте в репозиторий.
-window.ABONENT_CONFIG = Object.freeze({
-  publicUrl: '',
-  title: 'Абонент',
-  maxFileMB: 40,
-  // Пусто: прямой доступ на статическом хостинге; на Амвере API определяется автоматически.
-  apiBase: '',
-});
+// Только серверный источник PostgreSQL, без публичных облачных папок.
+window.ABONENT_CONFIG = Object.freeze({ publicUrl:'sochi:local:v1', title:'Сочинские ЭС', maxFileMB:80, apiBase:'' });
