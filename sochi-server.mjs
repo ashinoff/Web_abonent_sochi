@@ -33,7 +33,7 @@ function directoryItems(path,folders,offset) {
   else {
     const folder=folders.find(f=>f.res_path===path);
     if(folder) items=Object.values(folder.statuses||{}).filter(s=>s.path&&s.state!=='missing')
-      .map(s=>({type:'file',path:s.path,name:s.file,size:s.size,modified:s.modified}));
+      .map(s=>({type:'file',path:s.path,name:s.path.split('/').at(-1),originalName:s.file,size:s.size,modified:s.modified}));
     else {
       const status=folders.flatMap(f=>Object.values(f.statuses||{})).find(s=>s.path===path);
       return status?{type:'file',path:status.path,name:status.file,size:status.size,modified:status.modified}:null;
