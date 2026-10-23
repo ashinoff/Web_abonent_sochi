@@ -22,12 +22,23 @@ const templates = {
     example: ['00000001001', '0001001', '01', 'Точка учёта № 1', 'ТП-100', 1200, 980, 1050, 3230],
     text: [0,1,2],
   }),
-  incoming: year => ({
-    name: 'Приём',
-    headers: ['ТП', 'Номер счетчика', 'Дата приёма', 'Начальные показания', 'Конечные показания', 'Объём, кВт·ч', 'Примечание'],
-    example: ['ТП-100', '000012345678', year + '-10-23', 12000, 13200, 1200, 'Пример, замените строку'],
-    text: [1],
-  }),
+  incoming: year => {
+    // Current Sochi intake layout: seven source fields and a continuous
+    // historical series. Old event/receipt layouts remain supported by the
+    // importer; this template is for the richer monthly meter workbook.
+    const months=Array.from({length:69},(_,i)=>'01.'+
+      String(i%12+1).padStart(2,'0')+'.'+(year-5+Math.floor(i/12)));
+    const values=Array(69).fill(null);
+    values[0]=1200;values[68]=1450;
+    return {
+      name: 'Приём',
+      headers: ['№ ПУ','ТП','Разрешенная мощность, кВт','Тип (юр/физ)',
+        'Напряжение, кВ (0,22 / 0,4; пусто = авто)','Абонент','Адрес',...months],
+      example: ['000012345678','ТП-100',15,'физ','0,4',
+        'Демонстрационный абонент (удалить строку)','г. Сочи, ул. Примерная, 1',...values],
+      text: [0],
+    };
+  },
   instant: year => ({
     name: '31. Мгновенные значения',
     headers: ['Серийный', 'Время',
