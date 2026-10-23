@@ -93,7 +93,10 @@ function monthlyIdentifier(row,r,col,cellAt) {
   if(typeof value==='number'){
     // Use the same nonblocking identifier policy as the registry. XLSX stream
     // cells also carry their original XML number text to avoid JS rounding.
-    return clean(restoreIdentifier(String(value),cell||{t:'n',v:value}));
+    const stored=restoreIdentifier(String(value),cell||{t:'n',v:value});
+    // Account and TU numbers often have an Excel format such as 000000.
+    // Preserve those zeros exactly as the old monthly importer did.
+    return clean(cell?.z&&/^0+$/.test(cell.z)?stored.padStart(cell.z.length,'0'):stored);
   }
   return clean(value);
 }
