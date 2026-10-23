@@ -24,7 +24,7 @@ export function accountName(value){
   return value.trim();
 }
 export const roles=new Set(['user','admin','superadmin']);
-export const publicAccount=user=>user&&({id:user.id,name:user.full_name,login:user.login,role:user.role,active:user.active,bootstrap:Boolean(user.is_bootstrap),createdAt:user.created_at});
+export const publicAccount=user=>user&&({id:user.id,name:user.full_name,login:user.login,role:user.role,active:user.active,bootstrap:Boolean(user.is_bootstrap),createdAt:user.created_at,resPaths:Array.isArray(user.res_paths)?user.res_paths:[]});
 export function canManage(actor,targetRole){return actor?.role==='superadmin'||actor?.role==='admin'&&targetRole==='user';}
 export function assertManager(actor,target){if(!canManage(actor,target?.role)||target?.is_bootstrap)throw fault('Недостаточно прав для этой учётной записи.',403,'forbidden');}
 export async function hashPassword(password){
@@ -48,8 +48,10 @@ export function superAdminConfig(env){
 export const accountSchema=`CREATE TABLE IF NOT EXISTS abonent_accounts (
   id uuid PRIMARY KEY, login text NOT NULL UNIQUE, full_name text NOT NULL, password_hash text NOT NULL,
   role text NOT NULL CHECK(role IN ('user','admin','superadmin')), active boolean NOT NULL DEFAULT true,
+  res_paths text[] NOT NULL DEFAULT '{}',
   is_bootstrap boolean NOT NULL DEFAULT false, created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE abonent_accounts ADD COLUMN IF NOT EXISTS res_paths text[] NOT NULL DEFAULT '{}';
 CREATE UNIQUE INDEX IF NOT EXISTS abonent_one_bootstrap ON abonent_accounts(is_bootstrap) WHERE is_bootstrap;
 CREATE TABLE IF NOT EXISTS abonent_sessions (
   token_hash text PRIMARY KEY, account_id uuid NOT NULL REFERENCES abonent_accounts(id) ON DELETE CASCADE,
