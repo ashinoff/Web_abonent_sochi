@@ -1,4 +1,5 @@
 import { formatBytes } from './offline-copies.js';
+import { SOCHI_RES_NAMES, SOCHI_RES_PATHS, SOCHI_ROLES } from './sochi-config.js';
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const roleName={user:'Пользователь',admin:'Администратор',superadmin:'Суперадминистратор'};
@@ -6,6 +7,16 @@ const dates=value=>value?new Date(value).toLocaleString('ru-RU'):'—';
 export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=>fetch(...args)}){
   const $=selector=>document.querySelector(selector),panel=$('#admin-settings');
   let accounts=[],database=null,editing=null,loading=false,version=0;
+  const resChecks=$('#admin-res-checkboxes'),resBlock=$('#admin-user-res-scopes');
+  if(resChecks)resChecks.innerHTML=SOCHI_RES_PATHS.map((path,i)=>
+    `<label><input type="checkbox" data-res-scope="${esc(path)}"><span>${esc(SOCHI_RES_NAMES[i])}</span></label>`).join('');
+  const uploadRes=$('#admin-upload-res'),uploadRole=$('#admin-upload-role');
+  if(uploadRes)uploadRes.innerHTML=SOCHI_RES_PATHS.map((path,i)=>
+    `<option value="${esc(path)}">${esc(SOCHI_RES_NAMES[i])}</option>`).join('');
+  if(uploadRole)uploadRole.innerHTML=Object.entries(SOCHI_ROLES).map(([role,name])=>
+    `<option value="${role}">${esc(name)}</option>`).join('');
+  const updateScopes=()=>{if(resBlock)resBlock.hidden=$('#admin-user-role').value!=='user';};
+  $('#admin-user-role').addEventListener('change',updateScopes);
   const status=(selector,value,pending=false)=>{$(selector).textContent=value;$(selector).hidden=!value;$(selector).classList.toggle('loading',pending);};
   function allowed(){return ['admin','superadmin'].includes(account()?.role);}
   async function api(path,method='GET',body){
@@ -18,10 +29,12 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
     $('#admin-user-name').value=user?.name||'';$('#admin-user-login').value=user?.login||'';$('#admin-user-password').value='';$('#admin-user-password').required=!user;
     $('#admin-user-role').replaceChildren();for(const role of account()?.role==='superadmin'?['user','admin','superadmin']:['user']){const option=document.createElement('option');option.value=role;option.textContent=roleName[role];$('#admin-user-role').append(option);}
     $('#admin-user-role').value=user?.role||'user';$('#admin-user-active').checked=user?.active??true;
+    if(resChecks)resChecks.querySelectorAll('[data-res-scope]').forEach(box=>{box.checked=Boolean(user?.resPaths?.includes(box.dataset.resScope));});
+    updateScopes();
     status('#admin-account-message','');$('#admin-account-form').scrollIntoView({block:'start',behavior:'smooth'});$('#admin-user-name').focus();
   }
   function renderAccounts(){
-    $('#admin-account-list').innerHTML=accounts.map((user,i)=>`<article class="admin-account" data-account-id="${esc(user.id)}"><div><strong>${esc(user.name)}</strong><span>${esc(user.login)} · ${esc(roleName[user.role])}</span><small>${user.active?'Доступ разрешён':'Доступ отключён'}${user.bootstrap?' · Настраивается в переменных Амверы':''}</small></div>${user.bootstrap?'':`<div class="admin-row-actions"><button type="button" class="secondary" data-account-edit="${i}">Изменить</button><button type="button" class="secondary admin-danger" data-account-delete="${i}" ${user.id===account()?.id?'disabled':''}>Удалить</button></div>`}</article>`).join('')||'<p class="hint">Учётных записей пока нет. Создайте пользователя.</p>';
+    $('#admin-account-list').innerHTML=accounts.map((user,i)=>`<article class="admin-account" data-account-id="${esc(user.id)}"><div><strong>${esc(user.name)}</strong><span>${esc(user.login)} · ${esc(roleName[user.role])}</span><small>${user.active?'Доступ разрешён':'Доступ отключён'}${user.role==='user'?' · РЭС: '+(user.resPaths?.length||0):''}${user.bootstrap?' · Настраивается в переменных Амверы':''}</small></div>${user.bootstrap?'':`<div class="admin-row-actions"><button type="button" class="secondary" data-account-edit="${i}">Изменить</button><button type="button" class="secondary admin-danger" data-account-delete="${i}" ${user.id===account()?.id?'disabled':''}>Удалить</button></div>`}</article>`).join('')||'<p class="hint">Учётных записей пока нет. Создайте пользователя.</p>';
   }
   function renderDatabase(){
     if(!database)return;const value=database.overview;
@@ -52,6 +65,7 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
   $('#admin-account-form').addEventListener('submit',async event=>{
     event.preventDefault();const button=$('#admin-account-save');if(button.disabled)return;button.disabled=true;
     try{const body={name:$('#admin-user-name').value,login:$('#admin-user-login').value,role:$('#admin-user-role').value,active:$('#admin-user-active').checked};if($('#admin-user-password').value)body.password=$('#admin-user-password').value;
+      if(body.role==='user'&&resChecks){body.resPaths=[...resChecks.querySelectorAll('[data-res-scope]:checked')].map(node=>node.dataset.resScope);if(!body.resPaths.length)throw new Error('Назначьте пользователю хотя бы один РЭС.');}
       const saved=await api('accounts'+(editing?'/'+editing.id:''),editing?'PATCH':'POST',body);$('#admin-user-password').value='';$('#admin-account-form').hidden=true;editing=null;await refresh();[...$('#admin-account-list').children].find(row=>row.dataset.accountId===saved.account.id)?.scrollIntoView({block:'nearest',behavior:'smooth'});}
     catch(error){status('#admin-account-message',error.message);}finally{button.disabled=false;}
   });
@@ -59,12 +73,34 @@ export function initAdminUI({account,onDatabaseChanged=()=>{},fetcher=(...args)=
   $('#admin-res-list').addEventListener('click',event=>{
     const policy=event.target.closest('[data-res-policy]'),clear=event.target.closest('[data-res-clear]');
     if(policy){const blocked=policy.dataset.blocked!=='true';void action(policy,async()=>{await api('res-policy','POST',{resPath:policy.dataset.resPolicy,blocked});onDatabaseChanged();});}
-    if(clear&&window.confirm('Очистить пакеты этого РЭС в серверной базе и закрыть его загрузку? Учётные записи, пользовательские отметки, файлы Диска и копии на телефонах сохранятся.'))void action(clear,async()=>{await api('clear-data','POST',{resPath:clear.dataset.resClear,confirm:true});onDatabaseChanged();});
+    if(clear&&window.confirm('Очистить пакеты этого РЭС в серверной базе и закрыть его загрузку? Учётные записи, отметки и копии на телефонах сохранятся.'))void action(clear,async()=>{await api('clear-data','POST',{resPath:clear.dataset.resClear,confirm:true});onDatabaseChanged();});
   });
   $('#admin-global-policy').addEventListener('click',event=>{if(database&&window.confirm(database.globalBlocked?'Разрешить общую загрузку? Отдельные закрытые РЭС останутся закрытыми.':'Приостановить загрузку всех РЭС?'))void action(event.currentTarget,async()=>{await api('res-policy','POST',{resPath:'/',blocked:!database.globalBlocked});onDatabaseChanged();});});
   $('#admin-clear-database').addEventListener('click',event=>{if(window.confirm('Очистить ВСЕ подготовленные пакеты текущего источника и приостановить всю загрузку? Учётные записи и пользовательские отметки сохранятся.'))void action(event.currentTarget,async()=>{await api('clear-data','POST',{resPath:'/',confirm:true});onDatabaseChanged();});});
   $('#admin-clear-events').addEventListener('click',event=>{if(window.confirm('Очистить журнал ошибок и действий?'))void action(event.currentTarget,()=>api('clear-events','POST',{}));});
-  $('#admin-catalog-refresh').addEventListener('click',event=>{void action(event.currentTarget,()=>api('refresh-catalog','POST',{}));});
+  $('#admin-catalog-refresh').addEventListener('click',event=>{void refresh();});
+  $('#admin-upload-form')?.addEventListener('submit',async event=>{
+    event.preventDefault();
+    if(!allowed())return;
+    const button=$('#admin-upload-submit'),file=$('#admin-upload-file').files[0];
+    if(!file)return;
+    if(file.size>80*1048576){status('#admin-upload-message','Файл больше 80 МБ.');return;}
+    button.disabled=true;
+    status('#admin-upload-message','Загружаем и обрабатываем Excel на сервере. Не закрывайте страницу.',true);
+    try{
+      const url=new URL('./api/admin/upload',location.href);
+      url.searchParams.set('resPath',uploadRes.value);url.searchParams.set('role',uploadRole.value);url.searchParams.set('filename',file.name);
+      const response=await fetcher(url,{method:'POST',credentials:'same-origin',cache:'no-store',
+        headers:{'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:file});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error||'Сервер не принял файл.');
+      status('#admin-upload-message','Готово: '+file.name+'. Файл подготовлен в базе для '+SOCHI_RES_NAMES[SOCHI_RES_PATHS.indexOf(uploadRes.value)]+'.');
+      $('#admin-upload-file').value='';
+      onDatabaseChanged();
+      await refresh();
+    }catch(error){status('#admin-upload-message','Ошибка загрузки: '+error.message);}
+    finally{button.disabled=false;}
+  });
   const timer=setInterval(()=>{if(allowed()&&!panel.hidden&&$('#settings-dialog').open&&navigator.onLine&&document.visibilityState==='visible')void refresh({silent:true});},10000);timer?.unref?.();
   window.addEventListener('pagehide',()=>clearInterval(timer));return{refresh,reset(){version++;accounts=[];database=null;editing=null;$('#admin-account-form').hidden=true;$('#admin-user-password').value='';}};
 }
