@@ -550,6 +550,10 @@ async function openRes(res, { keepSettings = false, offlineCopy = null } = {}) {
     setBusy(false); message('#settings-message', error.message); showSettings(); return;
   }
   setBusy(false);
+  if(config.sochi && !offlineCopy) {
+    await readSochiSummary({keepSettings,signal});
+    return;
+  }
   if (selectedFile) await downloadFile({ keepSettings, signal, offlineOnly:Boolean(offlineCopy) });
   else {
     registryState = 'missing'; renderIndicators();
@@ -558,6 +562,77 @@ async function openRes(res, { keepSettings = false, offlineCopy = null } = {}) {
   if (loads.current(signal) && consumptionFile) await readConsumptionFile(signal, Boolean(offlineCopy), false);
   if (loads.current(signal) && incomingFile) await readIncomingFile(signal, Boolean(offlineCopy));
   if (loads.current(signal)) await readSelectedJournals(signal, Boolean(offlineCopy));
+}
+let serverReportReady = '';
+async function registryRequest(action,payload={},transfer=[]){
+  const serverActions=['summary','search','record','tps','tpMeters','notes','mapNotes','notificationRecord'];
+  if(config.sochi && navigator.onLine && !usingOfflineCopy && serverActions.includes(action)){
+    if(!selectedRes)throw new Error('Выберите РЭС.');
+    const response=await fetch(new URL('./api/registry',location.href),{
+      method:'POST',credentials:'same-origin',cache:'no-store',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({resPath:selectedRes.path,action,payload}),
+      signal:AbortSignal.timeout(120000),
+    });
+    const data=await response.json();
+    if(!response.ok)throw Object.assign(new Error(data.error||'Не удалось прочитать реестр.'),{status:response.status,code:data.code});
+    return data.result;
+  }
+  return rpc(action,payload,transfer);
+}
+async function readSochiSummary({keepSettings=false,signal=loads.signal}={}){
+  const current=selectedRes;
+  serverReportReady='';
+  try{
+    setBusy(true,'Получаем данные выбранной РЭС из базы…');
+    if(selectedFile){
+      summary=await registryRequest('summary');
+      if(!loads.current(signal)||selectedRes!==current)return;
+      registryState='ready'; registryError=''; pending=null;
+      currentSource={type:'disk',name:selectedFile.name,folder:selectedFolder.name,res:current.name,
+        root:rootUrl(),folderInfo:selectedFolder,resInfo:current,fileInfo:selectedFile,keepSettings};
+      const saved=await listOfflineCopies(rootUrl()).catch(()=>[]);
+      const copy=saved.find(item=>item.resPath===current.path);
+      if(copy&&summary)summary.cached=copy.files.some(file=>file.role==='registry'&&file.path===selectedFile.path);
+    }else {summary=null;registryState='missing';}
+    if(consumptionFile){
+      try {
+        const info=await sochiAnalysisRequest('analysisSummary',{});
+        if(!loads.current(signal)||selectedRes!==current)return;
+        consumptionInfo=info;consumptionState='ready';consumptionError='';
+      }catch(error){consumptionState='error';consumptionError=error.message;}
+    }else consumptionState='missing';
+    if(incomingFile){incomingInfo={sheets:1};incomingState='ready';}
+    else incomingState='missing';
+    for(const role of journalRoles){
+      const item=journalSources[role];
+      item.state=item.file?'ready':'missing';
+      item.info=item.file?{meterCount:0,stats:{},warnings:[]}:null;
+    }
+    setBusy(false);renderResults();
+    if(!keepSettings&&summary)$('#settings-dialog').close();
+  }catch(error){
+    if(!loads.current(signal)||selectedRes!==current)return;
+    registryState='error';registryError=error.message;summary=null;
+    setBusy(false);message('#settings-message',error.message);showSettings();
+  }
+}
+async function ensureSochiReportData(){
+  if(!config.sochi||usingOfflineCopy||!navigator.onLine||!selectedRes)return;
+  if(serverReportReady===selectedRes.path)return;
+  if(!selectedFile||!consumptionFile)throw new Error('Для отчёта нужен реестр и потребление этой РЭС.');
+  const res=selectedRes,files={registry:selectedFile,consumption:consumptionFile,...Object.fromEntries(journalRoles.map(role=>[role,journalSources[role].file]))};
+  setBusy(true,'Получаем исходные данные для Excel-отчёта…');
+  try{
+    await rpc('loadPreparedRegistry',{source:rootUrl(),path:files.registry.path,role:'registry'});
+    if(res!==selectedRes)throw new Error('РЭС изменилась.');
+    const records=await rpc('analysisRecords');
+    await monthlyRPC('loadPreparedMonthly',{source:rootUrl(),path:files.consumption.path,role:'consumption',records});
+    for(const role of journalRoles){
+      if(files[role]?.path)await monthlyRPC('loadPreparedJournal',{source:rootUrl(),path:files[role].path,role});
+    }
+    if(res!==selectedRes)throw new Error('РЭС изменилась.');
+    serverReportReady=res.path;
+  }finally{setBusy(false);}
 }
 async function fetchWorkbook(file, signal = loads.signal) {
   if (file.size > (config.maxFileMB || 40) * 1048576) throw new Error('Файл больше 40 МБ.');
@@ -743,6 +818,7 @@ async function downloadReportPart(index) {
 }
 async function exportAnomalies() {
   if (!selectedRes || !summary || consumptionState !== 'ready' || busy || exporting) return;
+  try{await ensureSochiReportData();}catch(error){toast(error.message);return;}
   const op = operation, res = selectedRes;
   exporting = true; exportSession = null; renderIndicators();
   $('#report-subtitle').textContent = res.name; $('#report-parts').replaceChildren();
@@ -917,7 +993,7 @@ async function doSearch(more = false) {
   const version = ++searchVersion;
   $('#search-submit').disabled = true; $('#show-more').disabled = true; message('#form-message', '');
   try {
-    const found = await rpc('search', { query, field: field(), partial: true, offset: more ? results.length : 0, limit: 30 });
+    const found = await registryRequest('search', { query, field: field(), partial: true, offset: more ? results.length : 0, limit: 30 });
     if (version !== searchVersion) return;
     results = more ? [...results, ...found.records] : found.records; resultTotal = found.total; submitted = true; renderResults();
     if (!more) {
@@ -965,7 +1041,7 @@ async function openTPs() {
   const version = tpVersion, op = operation;
   $('#tp-list').innerHTML = '<div class="loading-row"><span class="loading-indicator"></span>Читаем список ТП…</div>';
   try {
-    const choices = await rpc('tps');
+    const choices = await registryRequest('tps');
     if (version !== tpVersion || op !== operation) return;
     tpChoices = choices; showTPPicker();
     if (!choices.length) message('#tp-message', 'В реестре нет заполненных значений в столбце «ТП».');
@@ -1000,7 +1076,7 @@ async function selectTP(key, more = false) {
   }
   message('#tp-message', '');
   try {
-    const found = await rpc('tpMeters', { key, query, offset: more ? tpMeters.length : 0, limit: 100 });
+    const found = await registryRequest('tpMeters', { key, query, offset: more ? tpMeters.length : 0, limit: 100 });
     if (version !== tpVersion || op !== operation) return;
     tpSelection = found; tpMeters = more ? [...tpMeters, ...found.meters] : found.meters;
     renderTPMeters();
@@ -1021,7 +1097,7 @@ let activeRecord = null;
 async function openRecord(id, context = { parent: null, variants: [] }) {
   const version = ++recordVersion, op = operation;
   try {
-    const r = await rpc('record', { id });
+    const r = await registryRequest('record', { id });
     if (version !== recordVersion || op !== operation || context.parent && !$('#' + context.parent).open) return;
     activeRecord = r; recordContext = context;
     $('#record-body').innerHTML = `<div class="record-intro"><h3>${esc(r.fields.name || 'Абонент')}</h3><div class="record-address"><p>${esc(r.address || 'Адрес не указан')}</p><div class="record-actions" data-no-swipe><button type="button" class="record-map-button" data-mark-consumer aria-label="Отметить потребителя на карте и добавить комментарий" title="Отметить на карте">${icon('pin')}</button><button type="button" class="record-map-button record-analysis-button" id="consumer-analyze" ${consumptionState !== 'ready' || !r.fields.account ? 'disabled' : ''} aria-label="Провести анализ потребления" aria-describedby="analysis-availability" title="Провести анализ потребления">${icon('chart')}</button></div></div><p class="sr-only" id="analysis-availability">${consumptionState === 'ready' ? 'Анализ потребления выбранной точки учёта.' : 'Для анализа загрузите файл потребления в папку РЭС.'}</p></div><div class="record-main-numbers"><div class="quick-metric" data-tone="meter"><div class="number-label">Номер ПУ</div><div class="number-value">${esc(r.fields.meter || '—')}</div></div><div class="quick-metric" data-tone="account"><div class="number-label">Лицевой счёт</div><div class="number-value">${esc(r.fields.account || '—')}</div></div>${ratioLine(r)}</div>${renderRecordSections(r)}<div class="record-source">${esc(r.file)}<br>Лист «${esc(r.sheet)}», строка ${r.row}${isDemo ? '<br>Демонстрационные данные' : ''}</div><button class="secondary copy-record" id="copy-record">${icon('copy')}Скопировать данные</button>`;
@@ -1054,7 +1130,7 @@ const userNoteEditor=initUserNoteEditor({context:mapContext,save:(...args)=>user
 async function openUserNote(note) {
   const op=operation;
   try {
-    const found=await rpc('notificationRecord',{fields:note.fields});
+    const found=await registryRequest('notificationRecord',{fields:note.fields});
     if(op!==operation || !$('#notes-dialog').open)return;
     await openRecord(found.id,{parent:'notes-dialog',variants:found.variants});
   }catch(error){toast(error.message);}
@@ -1070,7 +1146,7 @@ async function clearNotifications(resPath,name,source=rootUrl()) {
   if(!window.confirm(`Очистить все пользовательские уведомления «${name}» у всех сотрудников? Примечания из реестра сохранятся.`))return false;
   await userNotes.clear(resPath,source);toast('Пользовательские уведомления РЭС очищены.');return true;
 }
-const notesUI=initNotesUI({request:rpc,openDialog,openRecord,openUserNote,deleteUserNote,mapContext,
+const notesUI=initNotesUI({request:registryRequest,openDialog,openRecord,openUserNote,deleteUserNote,mapContext,
   refreshUserNotes:fresh=>fresh?userNotes.sync({...notificationContext(),autoSync:true}):userNotes.refresh(),
 });
 userNotes.subscribe(data=>notesUI.setUserNotes(data));
@@ -1106,7 +1182,8 @@ const diagnosticsUI = initDiagnosticsUI({ openDialog, showSettings, context: () 
 accountUI=initAccountUI({canRefresh:()=>!usingOfflineCopy,onChange:({enabled,user})=>{if(enabled&&!user){if(busy)stopLoading();loads.start();clearDataset();adminUI.reset();}renderIndicators();},onLogout:()=>{adminUI.reset();clearDataset();}});
 const adminUI=initAdminUI({account:()=>accountUI.user,onDatabaseChanged:()=>{if(busy)stopLoading();void loadMap.refresh();directoryState='idle';folderRead=null;}});
 async function sochiAnalysisRequest(action,payload={},transfer=[],onProgress=()=>{}){
-  if(config.sochi && navigator.onLine && !usingOfflineCopy && ['analysisConsumer','analysisTP','analysisTPs'].includes(action)){
+  if(config.sochi&&navigator.onLine&&!usingOfflineCopy&&action==='exportAnomalies')await ensureSochiReportData();
+  if(config.sochi && navigator.onLine && !usingOfflineCopy && ['analysisConsumer','analysisTP','analysisTPs','analysisSummary'].includes(action)){
     if(!selectedRes)throw new Error('Выберите РЭС.');
     const response=await fetch(new URL('./api/analysis',location.href),{
       method:'POST',credentials:'same-origin',cache:'no-store',
