@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSochiServer } from '../sochi-server.mjs';
 import * as XLSX from '@e965/xlsx';
+import { randomBytes } from 'node:crypto';
+import { SOCHI_CHUNK_BYTES } from '../sochi-chunk-upload.mjs';
 import { SOCHI_SOURCE, SOCHI_ENTERPRISE_PATH, SOCHI_RES_NAMES, SOCHI_RES_PATHS, canAccessRes, canonicalSochiPath } from '../public/sochi-config.js';
 
 test('Sochi has exactly one enterprise and seven stable RES',()=>{
@@ -91,6 +93,39 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     const errorsView=await (await api('/api/admin/database',{headers:{Cookie:adminCookie}})).json();
     assert.ok(errorsView.events.some(event=>event.code==='upload_failed'&&event.res_path===SOCHI_RES_PATHS[0]),
       'failed imports should be visible in admin database analysis');
+
+    // Amvera-style ingress rejects large single bodies: the new API must
+    // accept a real Excel workbook split into many small authenticated POSTs.
+    const largeBook=XLSX.utils.book_new();
+    const opaque=randomBytes(400*1024).toString('base64');
+    const largeRows=[['ТП','Отпуск']];
+    for(let i=0;i<opaque.length;i+=10000)largeRows.push(['ТП-123',opaque.slice(i,i+10000)]);
+    XLSX.utils.book_append_sheet(largeBook,XLSX.utils.aoa_to_sheet(largeRows),'Приём');
+    const largeBytes=XLSX.write(largeBook,{type:'buffer',bookType:'xlsx'});
+    assert.ok(largeBytes.length>SOCHI_CHUNK_BYTES,'a full XLSX must exceed the proxy-safe chunk size');
+    const startPath='/api/admin/upload/start';
+    const meta={resPath:SOCHI_RES_PATHS[0],role:'incoming',filename:'Приём.xlsx',size:largeBytes.length};
+    assert.equal((await json(startPath,meta,userCookie)).status,403,'employees cannot initiate an upload');
+    const started=await json(startPath,meta,adminCookie);
+    assert.equal(started.status,200,await started.text().catch(()=>''));
+    const uploadSession=await started.json();
+    assert.equal(uploadSession.chunkSize,SOCHI_CHUNK_BYTES);
+    let index=0;
+    for(let offset=0;offset<largeBytes.length;offset+=SOCHI_CHUNK_BYTES,index++){
+      const part=largeBytes.subarray(offset,Math.min(offset+SOCHI_CHUNK_BYTES,largeBytes.length));
+      const response=await api('/api/admin/upload/chunk?uploadId='+encodeURIComponent(uploadSession.uploadId)+'&index='+index,{
+        method:'POST',headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:part,
+      });
+      assert.equal(response.status,200,await response.text().catch(()=>''));
+      assert.equal((await response.json()).received,offset+part.length);
+    }
+    assert.ok(index>=2,'one large Excel requires multiple requests');
+    const completed=await json('/api/admin/upload/complete',{uploadId:uploadSession.uploadId},adminCookie);
+    assert.equal(completed.status,200,await completed.text().catch(()=>''));
+    assert.equal((await completed.json()).ok,true);
+    assert.equal((await json('/api/admin/upload/cancel',{uploadId:uploadSession.uploadId},adminCookie)).status,404,
+      'completed workbook must be removed from temporary storage');
+
     const filePath=canonicalSochiPath(SOCHI_RES_PATHS[0],'incoming');
     const prepared=await api('/api/prepared?path='+encodeURIComponent(filePath)+'&role=incoming',{headers:{Cookie:userCookie}});
     assert.equal(prepared.status,200);
