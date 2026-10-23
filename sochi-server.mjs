@@ -159,7 +159,8 @@ export function createSochiServer(options={}) {
         const actor=await access.requireAdmin(req);
         if(req.method!=='POST')throw fault('Метод не поддерживается.',405);
         const uploadId=url.searchParams.get('uploadId');
-        const index=Number(url.searchParams.get('index'));
+        const rawIndex=url.searchParams.get('index');
+        const index=rawIndex===null?NaN:Number(rawIndex);
         const result=await uploads.chunk(req,{actor,uploadId,index});
         sendJson(res,200,{ok:true,...result});
         return;
