@@ -90,22 +90,56 @@ export function identifierColumns(layout) {
   for (const [c, label] of layout.labels.entries()) if (/номер|телефон|лицевой|^лс/i.test(label)) columns.add(c);
   return columns;
 }
-export function restoreIdentifier(value, cell, row) {
+// Only these identifiers determine who/what a registry record belongs to.
+// TT/TN manufacturer serials, phone numbers and other "номер" columns remain
+// visible in the full card but must not veto the whole registry's import.
+export function criticalIdentifierColumns(layout) {
+  return new Set(['meter','account','point','pointNumber'].map(key=>layout.mapping[key]).filter(Number.isInteger));
+}
+export const unsafeNumericIdentifier = cell => cell?.t === 'n' && Number.isInteger(cell.v) &&
+  (!Number.isSafeInteger(cell.v) || Math.abs(cell.v) >= 1e15);
+export function identifierIssue(row,column,label) {
+  const position=Number.isInteger(column)?` ячейка ${columnName(column)}${row}${label?` («${label}»)`:''}:`:'';
+  return `Строка ${row}:${position} длинный номер хранится в Excel как число. Нужен исходный текстовый номер: Excel мог округлить его.`;
+}
+// Aggregate only metadata about potentially rounded *secondary* serials.
+// We never claim to recover Excel digits that were already rounded.
+export function identifierWarnings() {
+  const affected=new Map();
+  return {
+    add(column,label,row) {
+      let item=affected.get(column);
+      if(!item){item={label,count:0,examples:[]};affected.set(column,item);}
+      item.count++;
+      if(item.examples.length<4)item.examples.push(row);
+    },
+    list() {
+      return [...affected].map(([column,item])=>
+        `Столбец ${columnName(column)} («${item.label}»): ${item.count} длинных номеров сохранены в отображении Excel; точность могла быть утрачена. Примеры строк: ${item.examples.join(', ')}. Проверьте первичную выгрузку.`);
+    },
+  };
+}
+export function restoreIdentifier(value, cell, row, {column,label}={}) {
   if (cell?.t !== 'n' || !Number.isInteger(cell.v)) return value;
-  if (!Number.isSafeInteger(cell.v) || Math.abs(cell.v) >= 1e15) throw new Error(`Строка ${row}: длинный номер хранится в Excel как число. Установите текстовый формат и восстановите исходный номер — Excel мог округлить его.`);
+  if (unsafeNumericIdentifier(cell)) throw new Error(identifierIssue(row,column,label));
   return /e[+-]\d+/i.test(String(value)) || !cell.z || cell.z === 'General' ? String(cell.v) : value;
 }
 export function isRegistryDataRow(values) {
   return values.some(Boolean) && headerScore(values) < 8 && !/^(итого|всего)(\s|$)/i.test(values[0]);
 }
-export function restoreNumericIdentifiers(matrix, worksheet, layout) {
-  // Excel's General display format switches long IDs to scientific notation.
-  // Read their stored integer value without losing intentional zero padding.
-  const columns = identifierColumns(layout);
-  for (let r = layout.end + 1; r < matrix.length; r++) for (const c of columns) {
-    const cell = worksheet['!data'] ? worksheet['!data'][r]?.[c] : worksheet[`${columnName(c)}${r + 1}`];
-    const value = restoreIdentifier(matrix[r]?.[c], cell, r + 1);
-    if (value !== matrix[r]?.[c]) matrix[r][c] = value;
+export function restoreNumericIdentifiers(matrix, worksheet, layout, warnings=identifierWarnings()) {
+  // Excel's General format switches long IDs to scientific notation.
+  // Search keys must be exact; peripheral TT/TN numbers are kept *as displayed*
+  // with a warning instead of discarding 44k good consumer rows.
+  const columns=identifierColumns(layout),critical=criticalIdentifierColumns(layout);
+  for(let r=layout.end+1;r<matrix.length;r++)for(const c of columns) {
+    const cell=worksheet['!data']?worksheet['!data'][r]?.[c]:worksheet[`${columnName(c)}${r+1}`];
+    if(unsafeNumericIdentifier(cell) && !critical.has(c)) {
+      warnings.add(c,layout.labels[c],r+1);
+      continue;
+    }
+    const value=restoreIdentifier(matrix[r]?.[c],cell,r+1,{column:c,label:layout.labels[c]});
+    if(value!==matrix[r]?.[c])matrix[r][c]=value;
   }
   return matrix;
 }
