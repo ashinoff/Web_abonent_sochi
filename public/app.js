@@ -167,7 +167,7 @@ function showRes() {
   openDialog('res-dialog'); renderResFolders();
   if (resState === 'error' && !busy) openFolder(selectedFolder, { choose: true });
 }
-function rootUrl() {const key=clean(config.publicUrl);return config.sochi&&accountUI?.user?.id?key+'@'+accountUI.user.id:key;}
+function rootUrl() {const key=clean(config.publicUrl),id=accountUI?.user?.id;return config.sochi&&id&&!key.endsWith('@'+id)?key+'@'+id:key;}
 function offlineRoot() { return rootUrl() || prefs.root || ''; }
 function renderOfflineAvailability(copies, error = false) {
   const count = copies.filter(copy => copy.files.some(file => file.role === 'registry')).length;
@@ -974,7 +974,7 @@ function renderResults() {
     const target = pending || selectedRes ? 'settings' : selectedFolder ? 'res' : 'enterprises';
     const title = pending ? 'Проверьте столбцы реестра' : selectedRes ? 'Реестр не подключён' : selectedFolder ? 'Выберите РЭС' : 'Выберите предприятие';
     const text = pending ? 'Подтвердите номера ПУ и лицевых счетов в настройках.' : selectedRes ? 'Проверьте файлы выбранной РЭС в настройках.' : selectedFolder ? 'Выберите район электрических сетей. Файлы загрузятся из его папки.' : 'Выберите предприятие, затем РЭС. Реестр загрузится автоматически.';
-    $('#results').innerHTML = emptyState(title, text, 'folder', `<button class="secondary" data-open-${target}>${target === 'settings' ? 'Открыть настройки' : target === 'res' ? 'Выбрать РЭС' : 'Выбрать предприятие'}</button>` + (pending ? '' : '<button class="text-button" id="start-demo">Посмотреть пример</button>'));
+    $('#results').innerHTML = emptyState(title, text, 'folder', `<button class="secondary" data-open-${target}>${target === 'settings' ? 'Открыть настройки' : target === 'res' ? 'Выбрать РЭС' : 'Выбрать предприятие'}</button>` + (pending || config.sochi ? '' : '<button class="text-button" id="start-demo">Посмотреть пример</button>'));
     return;
   }
   if (!submitted) { $('#results').innerHTML = emptyState('Можно искать', `В реестре ${recordsText(summary.count)}. Введите номер ПУ, лицевой счёт или адрес.`, 'search'); return; }
