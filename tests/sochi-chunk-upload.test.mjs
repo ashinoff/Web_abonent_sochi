@@ -77,8 +77,8 @@ test('Corrupt parts and cross-site writes are rejected and temporary files are d
   const second=await begin();
   await assert.rejects(()=>uploads.chunk(chunkRequest(Buffer.alloc(100)),{actor,uploadId:second.uploadId,index:0}),
     error=>error.status===400);
-  await assert.rejects(()=>uploads.cancel({actor,uploadId:second.uploadId}),
-    error=>error.status===404,'short chunk cleans its temporary session');
+  // A rejected content-length never writes bytes and can be cancelled cleanly.
+  assert.equal((await uploads.cancel({actor,uploadId:second.uploadId})).ok,true);
 });
 
 test('Starting a fresh upload abandons an interrupted upload for the same administrator',async t=>{

@@ -81,7 +81,7 @@ test('Large Excel is transmitted as bounded chunks, not one payload, and confirm
     }
     throw new Error('Unknown URL '+url);
   };
-  const result=await transferSochiExcel('https://sochi.example.test/api/admin/upload?resPath=%2Fsome-res&role=registry&filename=%D0%A0.xlsx',file,{
+  const result=await transferSochiExcel('https://sochi.example.test/api/admin/upload?resPath=%2Fsome-res&role=registry&filename='+encodeURIComponent(file.name),file,{
     fetcher,onProgress:(loaded,total)=>progress.push([loaded,total]),onTransferred:()=>events.push('all chunks received'),
   });
   assert.equal(result.ok,true);
