@@ -1,4 +1,6 @@
 import pg from 'pg';
+import { SOCHI_SOURCE, SOCHI_ENTERPRISE, SOCHI_ENTERPRISE_PATH, SOCHI_RES_NAMES, SOCHI_RES_PATHS } from './public/sochi-config.js';
+import { normalizeSettings } from './public/analysis-settings.js';
 import { notificationSchema, createNotificationStore } from './notification-store.mjs';
 import { accountSchema } from './accounts.mjs';
 import { createAccountStore } from './account-store.mjs';
@@ -30,7 +32,15 @@ export function createPreparedStore(env = process.env,{pool:providedPool}={}) {
       enterprise_name text NOT NULL, res_name text NOT NULL,
       statuses jsonb NOT NULL, checked_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (source, res_path)
-    )`)).then(() => pool.query(notificationSchema)).then(()=>pool.query(accountSchema)).then(()=>pool.query(adminSchema)).catch(error => { initialized = null; throw error; });
+    )`)).then(() => pool.query(notificationSchema)).then(()=>pool.query(accountSchema)).then(()=>pool.query(adminSchema))
+    .then(async()=>{
+      if(env.SOCHI_APP!=='1')return;
+      await pool.query("CREATE TABLE IF NOT EXISTS abonent_sochi_analysis_settings (source text PRIMARY KEY, settings jsonb NOT NULL DEFAULT '{}'::jsonb, updated_at timestamptz NOT NULL DEFAULT now(), updated_by text)");
+      for(const name of SOCHI_RES_NAMES) {
+        await pool.query("INSERT INTO abonent_folder_status (source,res_path,enterprise_path,enterprise_name,res_name,statuses) VALUES ($1,$2,$3,$4,$5,'{}'::jsonb) ON CONFLICT (source,res_path) DO NOTHING",
+          [SOCHI_SOURCE,SOCHI_ENTERPRISE_PATH+'/'+name,SOCHI_ENTERPRISE_PATH,SOCHI_ENTERPRISE,name]);
+      }
+    }).catch(error => { initialized = null; throw error; });
     await initialized;
   }
   const admin=createAdminStore(pool,ready);
@@ -117,6 +127,36 @@ export function createPreparedStore(env = process.env,{pool:providedPool}={}) {
     async pruneFolders(source, paths) {
       await ready();
       await pool.query('DELETE FROM abonent_folder_status WHERE source=$1 AND NOT (res_path = ANY($2::text[]))', [source, paths]);
+    },
+    async saveSochiUpload(source, {resPath,role,path,filename,size,revision,json,actor}) {
+      await ready();
+      if(source!==SOCHI_SOURCE||!SOCHI_RES_PATHS.includes(resPath)||!path.startsWith(resPath+'/'))throw new Error('Некорректный РЭС.');
+      const stamp=new Date().toISOString();
+      return admin.policyTransaction(async client=>{
+        assertPolicy(await admin.lockPolicy(client,source,resPath));
+        // A replacement is atomic: a failed conversion cannot remove the last good version.
+        await client.query("DELETE FROM abonent_snapshots WHERE source=$1 AND role=$2 AND left(path,length($3)+1)=$3||'/'",[source,role,resPath]);
+        await client.query("INSERT INTO abonent_snapshots (source,path,role,revision,data,payload_json) VALUES ($1,$2,$3,$4,'null'::jsonb,$5::json)",[source,path,role,revision,json]);
+        const status={state:'ready',file:filename,path,size,modified:stamp,updatedAt:stamp};
+        const changed=await client.query("UPDATE abonent_folder_status SET statuses=jsonb_set(statuses,ARRAY[$3],$4::jsonb,true),checked_at=now() WHERE source=$1 AND res_path=$2",
+          [source,resPath,role,JSON.stringify(status)]);
+        if(!changed.rowCount)throw new Error('РЭС отсутствует в базе.');
+        await client.query("INSERT INTO abonent_admin_events (source,res_path,category,code,message,actor) VALUES($1,$2,'upload','file_uploaded',$3,$4)",
+          [source,resPath,'Загружен '+filename+' ('+role+').',actor]);
+        return status;
+      });
+    },
+    async getSochiAnalysisSettings(source) {
+      await ready();
+      const {rows}=await pool.query('SELECT settings FROM abonent_sochi_analysis_settings WHERE source=$1',[source]);
+      return normalizeSettings(rows[0]?.settings||{});
+    },
+    async saveSochiAnalysisSettings(source,settings,actor) {
+      await ready();
+      const normalized=normalizeSettings(settings);
+      await pool.query("INSERT INTO abonent_sochi_analysis_settings(source,settings,updated_by) VALUES($1,$2,$3) ON CONFLICT(source) DO UPDATE SET settings=EXCLUDED.settings,updated_by=EXCLUDED.updated_by,updated_at=now()",
+        [source,JSON.stringify(normalized),actor]);
+      return normalized;
     },
     close: () => pool?.end(),
   };
