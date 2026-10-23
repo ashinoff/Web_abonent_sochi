@@ -84,14 +84,19 @@ function journalCases(result) {
 export function initAnalysisUI({ request, isReady, getIncoming, showConnection, onMapOpen, onAdminOpen, canTune=()=>true, loadSettings=async()=>null, saveSettings=async()=>{} }) {
   let settings; try { settings = normalizeSettings(JSON.parse(localStorage.getItem(storageKey) || '{}')); } catch { settings = normalizeSettings(); }
   let version=0, view=null, stack=[], tpChoices=[], parent=null;
+  let syncTimer=null;
   const save = () => {
     if(!canTune())return;
     try{localStorage.setItem(storageKey,JSON.stringify(settings));}catch{}
-    Promise.resolve(saveSettings(normalizeSettings(settings))).then(()=>{
-      if($('#analysis-settings-saved'))$('#analysis-settings-saved').textContent='Настройки сохранены в базе. Новый расчёт использует эти параметры.';
-    }).catch(error=>{
-      if($('#analysis-settings-saved'))$('#analysis-settings-saved').textContent='Не удалось сохранить настройки в базе: '+error.message;
-    });
+    clearTimeout(syncTimer);
+    if($('#analysis-settings-saved'))$('#analysis-settings-saved').textContent='Сохраняем правила в базе…';
+    syncTimer=setTimeout(()=>{
+      Promise.resolve(saveSettings(normalizeSettings(settings))).then(()=>{
+        if($('#analysis-settings-saved'))$('#analysis-settings-saved').textContent='Настройки сохранены в базе. Новый расчёт использует эти параметры.';
+      }).catch(error=>{
+        if($('#analysis-settings-saved'))$('#analysis-settings-saved').textContent='Ошибка сохранения в базе: '+error.message;
+      });
+    },450);
   };
   const journalReportUI = initJournalReportUI({ request, isReady, getSettings: () => normalizeSettings(settings) });
   for (const selector of ['#results', '#search-modal-results', '#record-body']) observeReadingEnergy($(selector));
