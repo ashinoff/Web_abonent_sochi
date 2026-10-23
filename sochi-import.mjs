@@ -35,7 +35,7 @@ export async function prepareSochiWorkbookFile(path,output,{role,filename,size,h
     // The child parser writes only its message to stderr, not a stack trace.
     // Expose known workbook/infrastructure limits to authenticated admins,
     // without returning raw SQL errors or internal filesystem paths.
-    if(/^(?:Проверка ключевых идентификаторов|Строка \d+:|Не найдена шапка|Книга не содержит|Нет числовых месячных|Месяцы в шапке|Листы содержат разные периоды|Количество месячных|В шапке нет года|Сопоставьте столбцы|Реестр слишком большой|Некорректный XLSX|В файле нет|Нет строк|Длинный номер|Excel мог округлить|Лист «)/i.test(detail))
+    if(/^(?:Проверка ключевых идентификаторов|Строка \d+:|Не найдена шапка|Книга не содержит|Нет числовых месячных|Месяцы в шапке|Листы содержат разные периоды|Количество месячных|В шапке нет года|Сопоставьте столбцы|Реестр слишком большой|Некорректный XLSX|В файле нет|Нет строк|Длинный номер|Excel мог округлить|Лист «|Месяцы «Приёма»|Листы «Приёма»|В «Приёме»|Файл слишком большой)/i.test(detail))
       throw fault(detail,422,'invalid_workbook');
     if(/^(?:Недостаточно памяти|Файл превышает доступный лимит памяти|Подготовка Excel превысила|Подготовленный пакет Excel превышает лимит)/i.test(detail))
       throw fault(detail,503,'workbook_limit');
