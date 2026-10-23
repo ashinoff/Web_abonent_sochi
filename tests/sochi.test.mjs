@@ -101,6 +101,22 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     const record=await askRegistry('record',{id:found.records[0].id});
     assert.equal((await record.json()).result.fields.meter,'000123456');
     assert.equal((await askRegistry('summary',{},SOCHI_RES_PATHS[1])).status,403);
+    const monthlyBook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(monthlyBook,XLSX.utils.aoa_to_sheet([
+      ['ЛС/Номер договора','ТУ','ТП','Январь 2026','Февраль 2026'],
+      ['000001','Дом 1','ТП-1',100,200],
+      ['000002','Дом 2','ТП-2',50,60],
+    ]),'ПО');
+    const monthlyUpload='/api/admin/upload?resPath='+encodeURIComponent(SOCHI_RES_PATHS[0])+'&role=consumption&filename='+encodeURIComponent('ПО.xlsx');
+    const monthlySaved=await api(monthlyUpload,{method:'POST',
+      headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},
+      body:XLSX.write(monthlyBook,{type:'buffer',bookType:'xlsx'})});
+    assert.equal(monthlySaved.status,200,await monthlySaved.text().catch(()=>'')); 
+    const analysisSummary=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[0],action:'analysisSummary'},userCookie);
+    assert.equal(analysisSummary.status,200);
+    assert.equal((await analysisSummary.json()).result.accountCount,2);
+    const accountAnalysis=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[0],action:'analysisConsumer',account:'000001'},userCookie);
+    assert.equal(accountAnalysis.status,200,await accountAnalysis.text().catch(()=>'')); 
     const saved=await json('/api/admin/analysis-settings',{settings:{red:60,amber:25}},adminCookie);
     assert.equal(saved.status,200);
     const read=await (await api('/api/analysis-settings',{headers:{Cookie:userCookie}})).json();
