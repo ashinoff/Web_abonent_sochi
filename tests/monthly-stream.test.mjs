@@ -8,6 +8,7 @@ import { writeMonthlyXLSX } from '../monthly-stream.mjs';
 import { prepareWorkbook } from '../prepared-workbook.mjs';
 import { parseMonthlyMatrix, indexMonthly } from '../public/monthly.js';
 import { unpackMonthly } from '../public/prepared-data.js';
+import { preparationChildFlags, prepareUploadedXlsx } from '../prepared-service.mjs';
 
 const months=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 const fields=[
@@ -104,4 +105,17 @@ test('Unordered/missing months remain a real spreadsheet error, not an implicit 
   const invalid=[...header];
   invalid[52]='Апрель 2021'; // Expected March
   assert.throws(()=>parseMonthlyMatrix([invalid,sourceRow()]),/пропуском/);
+});
+
+test('Sochi upload subprocess prepares a 119-column XLSX with bounded streaming heap',async t=>{
+  const f=await fixture(t,[header,...Array.from({length:1200},(_,i)=>sourceRow(i))],{bookSST:true});
+  const flags=await preparationChildFlags(f.path,'consumption','ПО.xlsx',512);
+  assert.deepEqual(flags,['--max-old-space-size=64','--max-semi-space-size=4'],
+    'a 512 MiB container uses a bounded streaming child, not the dense SheetJS parser');
+  const json=await prepareUploadedXlsx(f.path,f.output,'consumption','ПО.xlsx');
+  const pack=JSON.parse(json);
+  assert.equal(pack.rows.length,1200);
+  assert.equal(pack.months.length,69);
+  assert.equal(pack.rows[0][0],'1073000129');
+  assert.equal(pack.rows.at(-1)[0],'1073001328');
 });
