@@ -300,11 +300,21 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     assert.equal((await analysisSummary.json()).result.accountCount,2);
     const accountAnalysis=await json('/api/analysis',{resPath:SOCHI_RES_PATHS[0],action:'analysisConsumer',account:'000001'},userCookie);
     assert.equal(accountAnalysis.status,200,await accountAnalysis.text().catch(()=>'')); 
-    const saved=await json('/api/admin/analysis-settings',{settings:{red:60,amber:25}},adminCookie);
+    const saved=await json('/api/admin/analysis-settings',{settings:{red:60,amber:25,balPct:50}},adminCookie);
     assert.equal(saved.status,200);
     const read=await (await api('/api/analysis-settings',{headers:{Cookie:userCookie}})).json();
     assert.equal(read.settings.red,60);
     assert.equal(read.settings.amber,25);
+    assert.equal(read.settings.balPct,50);
+    const afterThreshold=await json('/api/analysis',{
+      resPath:SOCHI_RES_PATHS[0],action:'analysisTP',tp:'ТП-1',
+    },userCookie);
+    const recalculated=(await afterThreshold.json()).result.balance;
+    assert.equal(recalculated.totalIntake,500);
+    assert.equal(recalculated.imbalance,200);
+    assert.equal(recalculated.threshold,50);
+    assert.equal(recalculated.elevated,0,
+      'changing TP imbalance threshold must change flags, not kWh balances');
     const deleteUser=await json('/api/admin/accounts/'+account.id,{},adminCookie,'DELETE');
     assert.equal(deleteUser.status,200);
     assert.equal((await api('/api/load-map',{headers:{Cookie:userCookie}})).status,401);
