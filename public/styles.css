@@ -857,3 +857,53 @@ dialog.has-swipe-underlay::backdrop{background:#0e253868;backdrop-filter:blur(3p
   line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;
 }
 #admin-upload-message{white-space:pre-wrap;line-height:1.65}
+
+/* TP energy balance: actual monthly intake less complete useful consumption. */
+.tp-balance-panel{
+  margin:18px 0 22px;padding:20px 22px;border-radius:16px;
+  border:1px solid #ccdae7;background:#f9fbfe;color:#173455;
+  box-shadow:0 5px 18px rgba(14,49,81,.045);
+}
+.tp-balance-panel[data-balance-state="high"]{border-color:#e7bf97;background:#fffaf5}
+.tp-balance-panel[data-balance-state="negative"]{border-color:#a9c6e6;background:#f6faff}
+.tp-balance-heading{margin-bottom:14px;display:grid;gap:4px}
+.tp-balance-kicker{font-size:11px;font-weight:800;color:#537ba0;letter-spacing:.105em}
+.tp-balance-heading h3{margin:0;font-size:19px;line-height:1.35;color:#173455}
+.tp-balance-heading p{margin:3px 0 0;font-size:12px;color:#647c93}
+.tp-balance-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.tp-balance-summary>div{min-width:0;padding:13px 11px;border-radius:11px;border:1px solid #e0e9f1;background:#fff;display:grid;gap:5px}
+.tp-balance-summary span{font-size:12px;color:#678197}
+.tp-balance-summary strong{font-size:20px;font-weight:760;line-height:1.2;color:#1b466b;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.tp-balance-summary small{font-size:11px;color:#66829c}
+.tp-balance-panel[data-balance-state="high"] .tp-balance-summary>div:last-child strong{color:#a65b20}
+.tp-balance-panel[data-balance-state="negative"] .tp-balance-summary>div:last-child strong{color:#a23e52}
+.tp-balance-threshold{font-size:12px;line-height:1.65;color:#496985;margin:13px 0}
+.tp-balance-threshold strong{color:#284e78}
+.tp-balance-months{max-height:352px;overflow:auto;border:1px solid #dce6ef;border-radius:10px;background:#fff;scrollbar-gutter:stable}
+.tp-balance-table{width:100%;border-collapse:separate;border-spacing:0;font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
+.tp-balance-table thead th{position:sticky;top:0;z-index:1;background:#eff5fb;color:#41637f;font-weight:650;text-align:right;padding:10px 11px;border-bottom:1px solid #d7e4ee}
+.tp-balance-table thead th:first-child{text-align:left}
+.tp-balance-table tbody th,.tp-balance-table tbody td{padding:9px 11px;border-bottom:1px solid #edf1f5;text-align:right}
+.tp-balance-table tbody th{text-align:left;color:#345878;font-weight:650}
+.tp-balance-table tbody tr:last-child th,.tp-balance-table tbody tr:last-child td{border-bottom:0}
+.tp-balance-month-status{display:inline-block;font-size:11px;border-radius:5px;padding:3px 5px;color:#526b80;background:#eff4f8}
+.tp-balance-table tr[data-balance-month="high"]{background:#fff5e9}
+.tp-balance-table tr[data-balance-month="high"] td:nth-child(5),.tp-balance-table tr[data-balance-month="high"] .tp-balance-month-status{color:#a15924;font-weight:760}
+.tp-balance-table tr[data-balance-month="negative"]{background:#fff3f3}
+.tp-balance-table tr[data-balance-month="negative"] td:nth-child(5),.tp-balance-table tr[data-balance-month="negative"] .tp-balance-month-status{color:#b13e4c;font-weight:760}
+.tp-balance-table tr[data-balance-month="incomplete"],
+.tp-balance-table tr[data-balance-month="outside"],
+.tp-balance-table tr[data-balance-month="zero-intake"]{color:#9aabb8;background:#fafbfd}
+.tp-balance-note{font-size:12px;line-height:1.6;color:#607b93;margin:12px 0 0}
+.tp-balance-unavailable{padding:13px 15px;background:#fff;border-radius:9px;color:#486883;line-height:1.6;font-size:13px;margin:5px 0 10px;border:1px solid #dde6ef}
+.tp-balance-warnings{margin:12px 0 0;border:1px solid #e7d9bd;border-radius:9px;padding:9px 12px;background:#fffbf4;font-size:12px;color:#755a31}
+.tp-balance-warnings summary{cursor:pointer;font-weight:650}
+.tp-balance-warnings p{line-height:1.55;margin:8px 0}
+@media(max-width:700px){
+  .tp-balance-panel{margin:14px 0;padding:14px 12px;border-radius:13px}
+  .tp-balance-summary{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .tp-balance-summary strong{font-size:18px}
+  .tp-balance-months{max-height:330px}
+  .tp-balance-table{font-size:11px}
+  .tp-balance-table thead th,.tp-balance-table tbody th,.tp-balance-table tbody td{padding:8px}
+}
