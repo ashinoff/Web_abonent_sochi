@@ -1,6 +1,6 @@
-const version = 'abonent-shell-2026-10-16-v23';
+const version = 'abonent-shell-sochi-2026-10-23-v1';
 const shell = ['./','./index.html','./styles.css','./config.js','./app.js','./worker.js',
-  './account-ui.js','./admin-ui.js','./user-notifications.js','./user-note-editor.js','./map-library.js','./map-routes.js',
+  './sochi-config.js','./account-ui.js','./admin-ui.js','./user-notifications.js','./user-note-editor.js','./map-library.js','./map-routes.js',
   './journals.js','./journal-analysis.js','./journal-correlation.js','./journal-peer-context.js','./anomaly-report.js','./journal-ui.css','./analysis-observations.js',
   './journal-report.js','./journal-report-data.js','./journal-report-ui.js',
   './core.js','./monthly.js','./analysis-service.js','./analysis-engine.js','./analysis-settings.js',
