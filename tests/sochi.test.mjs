@@ -107,8 +107,8 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     const meta={resPath:SOCHI_RES_PATHS[0],role:'incoming',filename:'Приём.xlsx',size:largeBytes.length};
     assert.equal((await json(startPath,meta,userCookie)).status,403,'employees cannot initiate an upload');
     const started=await json(startPath,meta,adminCookie);
-    assert.equal(started.status,200,await started.text().catch(()=>''));
     const uploadSession=await started.json();
+    assert.equal(started.status,200,JSON.stringify(uploadSession));
     assert.equal(uploadSession.chunkSize,SOCHI_CHUNK_BYTES);
     let index=0;
     for(let offset=0;offset<largeBytes.length;offset+=SOCHI_CHUNK_BYTES,index++){
@@ -116,13 +116,15 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
       const response=await api('/api/admin/upload/chunk?uploadId='+encodeURIComponent(uploadSession.uploadId)+'&index='+index,{
         method:'POST',headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:part,
       });
-      assert.equal(response.status,200,await response.text().catch(()=>''));
-      assert.equal((await response.json()).received,offset+part.length);
+      const chunkResult=await response.json();
+      assert.equal(response.status,200,JSON.stringify(chunkResult));
+      assert.equal(chunkResult.received,offset+part.length);
     }
     assert.ok(index>=2,'one large Excel requires multiple requests');
     const completed=await json('/api/admin/upload/complete',{uploadId:uploadSession.uploadId},adminCookie);
-    assert.equal(completed.status,200,await completed.text().catch(()=>''));
-    assert.equal((await completed.json()).ok,true);
+    const completion=await completed.json();
+    assert.equal(completed.status,200,JSON.stringify(completion));
+    assert.equal(completion.ok,true);
     assert.equal((await json('/api/admin/upload/cancel',{uploadId:uploadSession.uploadId},adminCookie)).status,404,
       'completed workbook must be removed from temporary storage');
 
