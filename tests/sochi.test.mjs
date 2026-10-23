@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSochiServer } from '../sochi-server.mjs';
+import * as XLSX from '@e965/xlsx';
 import { SOCHI_SOURCE, SOCHI_ENTERPRISE_PATH, SOCHI_RES_NAMES, SOCHI_RES_PATHS, canAccessRes, canonicalSochiPath } from '../public/sochi-config.js';
 
 test('Sochi has exactly one enterprise and seven stable RES',()=>{
@@ -62,6 +63,20 @@ test('Sochi API uses authenticated scoped DB catalog and admin-only rules',async
     assert.equal(resDenied.status,403);
     assert.equal((await json('/api/admin/analysis-settings',{settings:{red:60}},userCookie)).status,403);
     assert.equal((await api('/api/resources',{headers:{Cookie:userCookie}})).status,404);
+    const book=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([['ТП','Отпуск'],['ТП-123',1000]]),'Лист1');
+    const bytes=XLSX.write(book,{type:'buffer',bookType:'xlsx'});
+    const uploadUrl='/api/admin/upload?resPath='+encodeURIComponent(SOCHI_RES_PATHS[0])+'&role=incoming&filename='+encodeURIComponent('Приём.xlsx');
+    assert.equal((await api(uploadUrl,{method:'POST',headers:{Cookie:userCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:bytes})).status,403,
+      'employee must not upload even a valid workbook');
+    const uploaded=await api(uploadUrl,{method:'POST',headers:{Cookie:adminCookie,'Content-Type':'application/octet-stream','X-Sochi-Upload':'1'},body:bytes});
+    assert.equal(uploaded.status,200,await uploaded.text().catch(()=>'')); 
+    const filePath=canonicalSochiPath(SOCHI_RES_PATHS[0],'incoming');
+    const prepared=await api('/api/prepared?path='+encodeURIComponent(filePath)+'&role=incoming',{headers:{Cookie:userCookie}});
+    assert.equal(prepared.status,200);
+    assert.equal((await prepared.json()).role,'incoming');
+    const directory=await api('/api/directory?path='+encodeURIComponent(SOCHI_RES_PATHS[0]),{headers:{Cookie:userCookie}});
+    assert.equal((await directory.json())._embedded.items[0].path,filePath);
     const saved=await json('/api/admin/analysis-settings',{settings:{red:60,amber:25}},adminCookie);
     assert.equal(saved.status,200);
     const read=await (await api('/api/analysis-settings',{headers:{Cookie:userCookie}})).json();
