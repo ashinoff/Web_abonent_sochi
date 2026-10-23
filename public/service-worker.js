@@ -1,4 +1,4 @@
-const version = 'abonent-shell-sochi-2026-10-23-v3';
+const version = 'abonent-shell-sochi-2026-10-23-v4';
 const shell = ['./','./index.html','./styles.css','./config.js','./app.js','./worker.js',
   './sochi-config.js','./account-ui.js','./admin-ui.js','./user-notifications.js','./user-note-editor.js','./map-library.js','./map-routes.js',
   './journals.js','./journal-analysis.js','./journal-correlation.js','./journal-peer-context.js','./anomaly-report.js','./journal-ui.css','./analysis-observations.js',
