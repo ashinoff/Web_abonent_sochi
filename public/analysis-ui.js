@@ -81,10 +81,18 @@ function journalCases(result) {
     return `<article class="journal-case" data-priority="${item.priority==='high' ? 'high' : 'check'}"><div class="case-heading"><h4>${esc(journalCaseTitle(item))}</h4><span class="case-meter">ПУ ${esc(item.serial)}</span></div><span class="priority-chip" data-zone="${item.priority==='high' ? 'red' : 'amber'}">${item.priority==='high' ? 'Высокий приоритет проверки' : 'Проверить'}</span>${item.detail ? `<p class="case-conclusion">${esc(formatEnergyText(item.detail))}</p>` : ''}<details class="case-month-analysis" ${entries.length===1 ? 'open' : ''}><summary>Сравнение потребления и исходные записи${entries.some(entry=>entry.month) ? ` · месяцев: ${entries.length}` : ''}</summary>${shown.map(entry=>`<div class="case-period">${journalCaseDetailHTML(item,entry)}</div>`).join('')}${entries.length>shown.length ? `<p class="case-limit">Показано ${shown.length} из ${entries.length} месяцев: начало и последние месяцы. Выберите месяц на графике для подробного сопоставления. Основные признаки можно выгрузить в отчёте по журналам.</p>` : ''}</details>${item.recommendation ? `<p class="case-recommendation">${esc(item.recommendation)}</p>` : ''}</article>`;
   }).join('') || '<p class="hint">Совокупности по доступным данным не сформированы. Проверьте охват журналов и даты измерений.</p>'}${count>Math.min(limit,cases.length) || journal.casesTruncated ? `<p class="case-limit">Показано ${Math.min(limit,cases.length)} из ${esc(count)} совокупностей. Основные причины — в отчёте по журналам; исходные записи — в журналах 31 и 46.</p>` : ''}</section>`;
 }
-export function initAnalysisUI({ request, isReady, getIncoming, showConnection, onMapOpen, onAdminOpen }) {
+export function initAnalysisUI({ request, isReady, getIncoming, showConnection, onMapOpen, onAdminOpen, canTune=()=>true, loadSettings=async()=>null, saveSettings=async()=>{} }) {
   let settings; try { settings = normalizeSettings(JSON.parse(localStorage.getItem(storageKey) || '{}')); } catch { settings = normalizeSettings(); }
   let version=0, view=null, stack=[], tpChoices=[], parent=null;
-  const save = () => { try { localStorage.setItem(storageKey, JSON.stringify(settings)); } catch {} };
+  const save = () => {
+    if(!canTune())return;
+    try{localStorage.setItem(storageKey,JSON.stringify(settings));}catch{}
+    Promise.resolve(saveSettings(normalizeSettings(settings))).then(()=>{
+      if($('#analysis-settings-saved'))$('#analysis-settings-saved').textContent='Настройки сохранены в базе. Новый расчёт использует эти параметры.';
+    }).catch(error=>{
+      if($('#analysis-settings-saved'))$('#analysis-settings-saved').textContent='Не удалось сохранить настройки в базе: '+error.message;
+    });
+  };
   const journalReportUI = initJournalReportUI({ request, isReady, getSettings: () => normalizeSettings(settings) });
   for (const selector of ['#results', '#search-modal-results', '#record-body']) observeReadingEnergy($(selector));
   const mobileLayout = $('#analysis-body').ownerDocument.defaultView.matchMedia('(max-width: 700px)');
@@ -124,21 +132,27 @@ export function initAnalysisUI({ request, isReady, getIncoming, showConnection, 
       ${TUNE_ORDER.map(key=>{const p=buildTune(settings.levels)[key], meta=ALG_META[key]; return `<div class="tuning-row ${settings.algOff[key]?'tuning-off':''}" data-tuning-row="${key}"><label class="tuning-switch"><input type="checkbox" data-algorithm="${key}" ${!settings.algOff[key]?'checked':''}><span><small>${meta.code}${['zeroAlive','peers','season','imb','dzero','dsync'].includes(key)?' · контур ТП':''}${key.startsWith('d')?' · сутки':''}</small><strong>${esc(meta.title)}</strong></span></label>${help(ALGORITHM_HELP[key], `${meta.code} ${meta.title}`, 'analysis-row-help')}<label class="tuning-range"><span data-level-label>${LEVEL_NAMES[p.level]}</span><input aria-label="Чувствительность ${esc(meta.title)}" type="range" min="-2" max="2" step="1" value="${p.level}" data-level="${key}" ${settings.algOff[key]?'disabled':''}></label><p class="hint" data-tune-hint>${esc(TUNE_HINT[key](p))} · вес ×${p.ptsF}</p></div>`;}).join('')}`;
     const boosts = `<p class="hint">Добавляется к баллам при выполнении условия. Тип потребителя учитывается, только если его можно определить из наименования.</p>${BOOST_DEFS.map(b=>`<label class="boost-option"><input type="checkbox" data-boost="${b.id}" ${settings.boosts[b.id]?'checked':''}><span>${esc(b.label)}</span><small>+${b.pts}</small></label>`).join('')}`;
     const balance = `<label class="analysis-setting">Допустимая доля потерь, %<input type="number" min="0" max="50" step="0.1" value="${settings.balPct}" data-setting="balPct"></label><p class="hint">Порог сохранён для будущих сценариев. При наличии строк отпуска баланс ТП показывается отдельно; этот порог пока не меняет его расчёт.</p>`;
-    $('#analysis-settings').innerHTML = analysisSection('method', 'Методика анализа', method) + analysisSection('signs', 'Признаки и чувствительность', signs) + analysisSection('boosts', 'Дополнительный приоритет', boosts) + analysisSection('balance', 'Будущий баланс ТП', balance) + `<button type="button" class="secondary full-width" id="analysis-reset">Вернуть стандартные настройки</button><p class="hint" id="analysis-settings-saved" role="status">Настройки сохраняются на этом устройстве.</p>`;
+    $('#analysis-settings').innerHTML = analysisSection('method', 'Методика анализа', method) + analysisSection('signs', 'Признаки и чувствительность', signs) + analysisSection('boosts', 'Дополнительный приоритет', boosts) + analysisSection('balance', 'Будущий баланс ТП', balance) + `<button type="button" class="secondary full-width" id="analysis-reset">Вернуть стандартные настройки</button><p class="hint" id="analysis-settings-saved" role="status">Настройки методики хранятся в общей базе PostgreSQL.</p>`;
+    if(!canTune()){
+      $('#analysis-settings').querySelectorAll('input,select,button#analysis-reset').forEach(control=>{control.disabled=true;});
+      $('#analysis-settings-saved').textContent='Только администратор может изменить правила и пороги расчётов.';
+    }
   }
   $('#analysis-settings').addEventListener('input', e => {
+    if(!canTune())return;
     const key=e.target.dataset.level; if (!key) return;
     settings.levels[key]=Number(e.target.value); const p=buildTune(settings.levels)[key], row=e.target.closest('.tuning-row');
     row.querySelector('[data-level-label]').textContent=LEVEL_NAMES[p.level]; row.querySelector('[data-tune-hint]').textContent=TUNE_HINT[key](p)+' · вес ×'+p.ptsF; save();
   });
   $('#analysis-settings').addEventListener('change', e => {
+    if(!canTune())return;
     const {setting,algorithm,boost}=e.target.dataset;
     if (setting) { settings[setting]=['zone','gran'].includes(setting)?e.target.value:Number(e.target.value); settings=normalizeSettings(settings); document.querySelectorAll('[data-setting]').forEach(el=>el.value=settings[el.dataset.setting]); }
     if (algorithm) { settings.algOff[algorithm]=!e.target.checked; const row=e.target.closest('.tuning-row'); row.classList.toggle('tuning-off',!e.target.checked); row.querySelector('[data-level]').disabled=!e.target.checked; }
     if (boost) settings.boosts[boost]=e.target.checked;
     save(); $('#analysis-settings-saved').textContent='Сохранено. Новый расчёт использует эти настройки.';
   });
-  $('#analysis-settings').addEventListener('click',e=>{if(e.target.closest('#analysis-reset')){settings=normalizeSettings(defaultSettings());save();renderSettings();}});
+  $('#analysis-settings').addEventListener('click',e=>{if(canTune()&&e.target.closest('#analysis-reset')){settings=normalizeSettings(defaultSettings());save();renderSettings();}});
   function notices(data, result=null) {
     const notes=[...data.warnings];
     if (result?.meter.incomplete) notes.push(`Месяцев с неполными данными: ${result.meter.incomplete}. Их сумма и сравнения не рассчитываются.`);
@@ -207,7 +221,21 @@ export function initAnalysisUI({ request, isReady, getIncoming, showConnection, 
   $('#analysis-dialog').addEventListener('close',()=>{version++;view=null;stack=[];parent=null;$('#analysis-body').replaceChildren();});
   $('#analysis-picker-dialog').addEventListener('close',()=>{if(!$('#analysis-dialog').open)version++;});
   renderSettings();
-  return { settingsTab, openConsumer:(account,point)=>open('consumer',account,null,false,point), openTP:tp=>open('tp',tp), openTPs,
+  return { settingsTab,
+    async refreshSettings(){
+      try {
+        const loaded=await loadSettings();
+        if(loaded){
+          settings=normalizeSettings(loaded);
+          try{localStorage.setItem(storageKey,JSON.stringify(settings));}catch{}
+        }
+        renderSettings();
+      }catch(error){
+        renderSettings();
+        if($('#analysis-settings-saved'))$('#analysis-settings-saved').textContent='Используются сохранённые параметры. '+error.message;
+      }
+    },
+    openConsumer:(account,point)=>open('consumer',account,null,false,point), openTP:tp=>open('tp',tp), openTPs,
     getSettings:()=>normalizeSettings(settings),
     canGoBack:()=>stack.length>0||Boolean(parent&&$('#'+parent).open),
     back(){if(stack.length){view=stack.pop();renderView(view.scroll);}else $('#analysis-dialog').close();},
