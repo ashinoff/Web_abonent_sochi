@@ -14,7 +14,7 @@ export function createSochiAnalytics({store,source,registry=null}) {
     const statuses = folder.statuses || {};
     const consumption = statuses.consumption;
     if (!consumption?.path) throw fault('Администратор ещё не загрузил файл ПО для этой РЭС.',404,'no_consumption');
-    const roles = ['registry','consumption','instant','events'];
+    const roles = ['registry','consumption','incoming','instant','events'];
     const versions = await Promise.all(roles.map(async role => statuses[role]?.path
       ? (await store.getMeta(source,statuses[role].path,role))?.revision || null : null));
     const signature = JSON.stringify([resPath,versions]);
@@ -32,9 +32,10 @@ export function createSochiAnalytics({store,source,registry=null}) {
       const records = registry ? await registry.analysisRecords(resPath) : registryPack ? unpackRegistry(registryPack).flatMap(sheet => sheet.records) : [];
       const instant = await read('instant');
       const events = await read('events');
+      const incoming = await read('incoming');
       const service = createAnalysisService(indexMonthly(unpackMonthly(monthly)),records,{
         instant:instant || null,events:events ? normalizeEventPack(events) : null,
-      });
+      },incoming);
       cache.delete(resPath);
       cache.set(resPath,{signature,service});
       // Keep the server bounded: older RES are rebuilt from PostgreSQL as needed.

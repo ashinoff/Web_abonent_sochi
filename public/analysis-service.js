@@ -1,6 +1,7 @@
 import { analyze, setTune, setZoneMode, setBoosts, setAlgOff } from './analysis-engine.js';
 import { normalizeSettings } from './analysis-settings.js';
 import { idKey } from './core.js';
+import { createTpBalances } from './tp-balance.js';
 import { numeric, tpKey, strictSum, pointKey, accountPointKey, samePoint, selectPointRows } from './monthly.js';
 import { createJournalAnalysis } from './journal-analysis.js';
 import { flagObservation } from './analysis-observations.js';
@@ -25,7 +26,8 @@ const MONTHLY_RECOMMENDATIONS = {
 };
 export const monthlyRecommendation = flag => flag.recommendation || MONTHLY_RECOMMENDATIONS[flag.code] || '';
 
-export function createAnalysisService(model, records = [], journals = {}) {
+export function createAnalysisService(model, records = [], journals = {}, incomingPack = null) {
+  const tpBalances=createTpBalances(incomingPack);
   const journalAnalysis = createJournalAnalysis(model, records, journals);
   const annotateJournalContext = journalAnalysis ? createJournalPeerContext(model) : null;
   const byAccount = new Map();
@@ -109,6 +111,7 @@ export function createAnalysisService(model, records = [], journals = {}) {
     return [...choices][0];
   }
   const metadata = { months: model.months, warnings: model.warnings, rowCount: model.rows.length, accountCount: model.accounts.size, missingTP: model.rows.filter(r => !r.tp).length,
+    balanceSource:{status:tpBalances.status,...tpBalances.summary},
     ...(journalAnalysis ? { journalCoverage: journalAnalysis.coverage() } : {}) };
   function* generateReport(settings, compact = false) {
     const rows = [], counts = { accounts: model.accounts.size, selected: 0, red: 0, amber: 0, green: 0, dead: 0, unknown: 0, journalCheck: 0, journalHigh: 0 };
@@ -211,7 +214,21 @@ export function createAnalysisService(model, records = [], journals = {}) {
   }
   return {
     summary: metadata,
-    tps: () => [...tpRows].map(([key, g]) => ({ key, name: g.name, accounts: g.accounts.size })).sort((a,b) => a.name.localeCompare(b.name,'ru',{numeric:true})),
+    tps: () => {
+      const listed=[...tpRows].map(([key,g])=>({
+        key,name:g.name,accounts:g.accounts.size,
+        incoming:tpBalances.hasTP(g.name),
+      }));
+      // Visible but unmatched intake TPs matter: they cannot be silently
+      // treated as balanced, because no consumption contour matches them.
+      for(const intake of tpBalances.tpList()){
+        const key=tpKey(intake.name);
+        if(!tpRows.has(key))listed.push({
+          key,name:intake.name,accounts:0,incoming:true,incomingOnly:true,
+        });
+      }
+      return listed.sort((a,b)=>a.name.localeCompare(b.name,'ru',{numeric:true}));
+    },
     consumer(account, settings, tp = null, point = null) {
       const key = resolveAccount(account), group = tp ? tpRows.get(tpKey(tp)) : null;
       if (tp && !group?.accounts.has(key)) throw new Error('Этот ЛС отсутствует в выбранном контуре ТП.');
@@ -227,12 +244,34 @@ export function createAnalysisService(model, records = [], journals = {}) {
     },
     contour(tp, settings) {
       const key = tpKey(tp), group = tpRows.get(key);
-      if (!group) throw new Error(`ТП ${tp} не найдена в файле потребления. Проверьте столбец «ТП» в файле потребления.`);
-      const results = run('contour:' + key, settings).results.filter(r => r.meter.tp === 'tp:' + key);
-      const values = strictSum(group.rows, model.months.length);
-      const flags = new Map(); for (const r of results) for (const f of r.flags) { const old = flags.get(f.code) || { code: f.code, title: f.title, count: 0 }; old.count++; flags.set(f.code, old); }
-      const registryMeters = new Set(records.filter(r => tpKey(r.fields.tp) === key).map(r => idKey(r.fields.meter)).filter(Boolean));
-      return { ...metadata, tp: group.name, values, total: values.some(v => v != null) ? values.reduce((s,v) => s + (v ?? 0), 0) : null, completeMonths: values.filter(v => v != null).length, rowCount: group.rows.length, pointCount: new Set(group.rows.map(accountPointKey).filter(Boolean)).size, meterCount: registryMeters.size, results, flags: [...flags.values()], incoming: { status: 'awaiting-format', values: null }, counts: Object.fromEntries(['red','amber','green','dead','unknown'].map(k => [k, results.filter(r => r.cls === k).length])) };
+      if(!group&&!tpBalances.hasTP(tp))
+        throw new Error(`ТП ${tp} не найдена ни в файле ПО, ни в файле «Приём» выбранной РЭС.`);
+      const results=group
+        ?run('contour:'+key,settings).results.filter(r=>r.meter.tp==='tp:'+key):[];
+      const values=group?strictSum(group.rows,model.months.length):Array(model.months.length).fill(null);
+      const flags=new Map();
+      for(const r of results)for(const f of r.flags){
+        const old=flags.get(f.code)||{code:f.code,title:f.title,count:0};
+        old.count++;flags.set(f.code,old);
+      }
+      const registryMeters=new Set(records.filter(r=>tpKey(r.fields.tp)===key)
+        .map(r=>idKey(r.fields.meter)).filter(Boolean));
+      const config=normalizeSettings(settings);
+      const balance=tpBalances.compare(tp,model.months,values,{
+        threshold:config.balPct,hasConsumption:Boolean(group),
+      });
+      return {...metadata,tp:group?.name||tp,values,
+        total:values.some(v=>v!=null)?values.reduce((s,v)=>s+(v??0),0):null,
+        completeMonths:values.filter(v=>v!=null).length,
+        rowCount:group?.rows.length||0,
+        pointCount:group?new Set(group.rows.map(accountPointKey).filter(Boolean)).size:0,
+        meterCount:registryMeters.size,results,flags:[...flags.values()],
+        // Preserve the previous incoming field for other clients. The richer
+        // balance object is source of truth for the TP analysis screen.
+        incoming:{status:balance.status,values:balance.values},
+        balance,counts:Object.fromEntries(['red','amber','green','dead','unknown']
+          .map(k=>[k,results.filter(r=>r.cls===k).length])),
+      };
     },
     report(settings) {
       const iterator = generateReport(settings); let step;
