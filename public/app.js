@@ -1356,7 +1356,9 @@ $('#tp-list').addEventListener('click', e => { const b = e.target.closest('[data
 $('#tp-more').addEventListener('click', () => selectTP(tpSelection.key, true));
 $('#tp-meters').addEventListener('click', e => { const b = e.target.closest('[data-tp-meter]'); if (!b) return; const meter = tpMeters[Number(b.dataset.tpMeter)]; openRecord(meter.variants[0].id, { parent: 'tp-dialog', variants: meter.variants }); });
 $('#read-folders').addEventListener('click', refreshSources);
-$('#folder-list').addEventListener('click', e => { const button = e.target.closest('[data-folder]'); if (button) selectFolder(Number(button.dataset.folder)); });
+// The enterprise selector is intentionally absent in Sochi. Keep its event
+// handler only when the legacy multi-enterprise interface provides the node.
+$('#folder-list')?.addEventListener('click', e => { const button = e.target.closest('[data-folder]'); if (button) selectFolder(Number(button.dataset.folder)); });
 $('#res-list').addEventListener('click', e => { const button = e.target.closest('[data-res]'); if (button) selectRes(Number(button.dataset.res)); });
 $('#confirm-mapping').addEventListener('click', () => confirmMapping());
 $('#mapping-fields').addEventListener('change', updateMapPreview);
