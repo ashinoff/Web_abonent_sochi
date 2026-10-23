@@ -96,14 +96,22 @@ export function identifierColumns(layout) {
 export function criticalIdentifierColumns(layout) {
   return new Set(['meter','account','point','pointNumber'].map(key=>layout.mapping[key]).filter(Number.isInteger));
 }
+// A 16-digit identifier can still be an *exact* integer in JavaScript:
+// 6003481006073610 is below Number.MAX_SAFE_INTEGER (9007199254740991).
+// Never reject it solely for having more than 15 digits. Excel's original
+// numeric input may nevertheless have been rounded, so report a warning.
 export const unsafeNumericIdentifier = cell => cell?.t === 'n' && Number.isInteger(cell.v) &&
-  (!Number.isSafeInteger(cell.v) || Math.abs(cell.v) >= 1e15);
+  !Number.isSafeInteger(cell.v);
+export const longNumericIdentifier = cell => cell?.t === 'n' && Number.isInteger(cell.v) &&
+  Math.abs(cell.v) >= 1e15;
 export function identifierIssue(row,column,label) {
   const position=Number.isInteger(column)?` ячейка ${columnName(column)}${row}${label?` («${label}»)`:''}:`:'';
   return `Строка ${row}:${position} длинный номер хранится в Excel как число. Нужен исходный текстовый номер: Excel мог округлить его.`;
 }
-// Aggregate only metadata about potentially rounded *secondary* serials.
-// We never claim to recover Excel digits that were already rounded.
+// Aggregate only metadata about all potentially rounded 16+ digit numeric
+// identifiers, including key meter/account numbers when their integer value
+// is representable precisely. Never claim that the original Excel input can
+// be recovered from the resulting cell.
 export function identifierWarnings() {
   const affected=new Map();
   return {
@@ -115,7 +123,7 @@ export function identifierWarnings() {
     },
     list() {
       return [...affected].map(([column,item])=>
-        `Столбец ${columnName(column)} («${item.label}»): ${item.count} длинных номеров сохранены в отображении Excel; точность могла быть утрачена. Примеры строк: ${item.examples.join(', ')}. Проверьте первичную выгрузку.`);
+        `Столбец ${columnName(column)} («${item.label}»): ${item.count} длинных числовых номеров сохранены без изменения прочитанного значения; Excel мог округлить их при экспорте. Примеры строк: ${item.examples.join(', ')}. При необходимости сверяйте с первичной системой.`);
     },
   };
 }
@@ -138,6 +146,8 @@ export function restoreNumericIdentifiers(matrix, worksheet, layout, warnings=id
       warnings.add(c,layout.labels[c],r+1);
       continue;
     }
+    if(longNumericIdentifier(cell) && !unsafeNumericIdentifier(cell))
+      warnings.add(c,layout.labels[c],r+1);
     const value=restoreIdentifier(matrix[r]?.[c],cell,r+1,{column:c,label:layout.labels[c]});
     if(value!==matrix[r]?.[c])matrix[r][c]=value;
   }
