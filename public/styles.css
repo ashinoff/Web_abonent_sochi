@@ -847,3 +847,13 @@ dialog.has-swipe-underlay::backdrop{background:#0e253868;backdrop-filter:blur(3p
 #admin-upload-progress[data-stage="done"] #admin-upload-progress-bar{accent-color:#32865e}
 #admin-upload-progress[data-stage="error"] #admin-upload-progress-bar{accent-color:#d77b74}
 #admin-upload-submit:disabled{opacity:.68;cursor:progress}
+
+/* Numeric IDs imported from a 1C registry: distinguish warnings from errors.
+   Excel may already have rounded factory TT/TN numbers; never present them as
+   verified IDs or hide the warning after accepting the rest of the registry. */
+.admin-error[data-kind="warning"]{
+  color:#815e24;background:#fff8e9;border:1px solid #eedbb6;
+  border-left:3px solid #c99538;border-radius:7px;padding:9px 11px;
+  line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;
+}
+#admin-upload-message{white-space:pre-wrap;line-height:1.65}
