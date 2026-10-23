@@ -1269,6 +1269,8 @@ document.addEventListener('click', e => {
   if (indicator?.dataset.state === 'off') { diagnosticsUI.open(indicator.id === 'base-indicator' ? 'base' : 'registry'); return; }
   if (e.target.closest('[data-stop-loading]')) stopLoading();
   if (e.target.closest('[data-open-settings]')) showSettings();
+  // Multi-enterprise compatibility remains only for legacy fixtures; Sochi has no such button.
+  if (!config.sochi && e.target.closest('[data-open-enterprises]')) showEnterprises();
   if (e.target.closest('[data-open-res]')) showRes();
 });
 document.querySelectorAll('.close-dialog').forEach(button => button.addEventListener('click', () => dialogControls.get(button.closest('dialog').id).dismiss()));

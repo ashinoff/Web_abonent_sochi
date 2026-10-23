@@ -45,6 +45,13 @@ test('UI keeps selection responsive, preserves ready data on stop and manages on
   t.mock.method(globalThis, 'clearTimeout', timer => { timers.delete(timer); clearTimer(timer); });
   const page = new Window({ url:'https://app.example.test/', settings:{ disableCSSFileLoading:true, disableJavaScriptFileLoading:true } });
   page.document.write(await readFile(new URL('../public/index.html', import.meta.url), 'utf8'));
+  // This suite simulates the original two-enterprise interface. The Sochi page intentionally
+  // omits this control, so restore it exclusively inside the legacy test fixture.
+  const legacyBack = page.document.createElement('button');
+  legacyBack.type = 'button';
+  legacyBack.dataset.openEnterprises = '';
+  legacyBack.textContent = 'Другое предприятие';
+  page.document.querySelector('#res-dialog .selection-actions').prepend(legacyBack);
   const controllerListeners = []; let reloads = 0, updates = 0, registerOptions;
   const nav = { onLine:true, storage:{ estimate:async () => ({ quota:1e9,usage:0 }) }, serviceWorker:{ controller:{}, addEventListener:(name, listener) => { if (name === 'controllerchange') controllerListeners.push(listener); }, register:async (_url, options) => { registerOptions = options; return { update:async () => { updates++; } }; }, ready:Promise.resolve({}) } };
   t.mock.method(page.location, 'reload', () => { reloads++; });
